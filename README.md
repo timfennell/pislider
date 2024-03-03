@@ -2,7 +2,10 @@
 Raspberry Pi Controlled Motorized Camera Slider
 
 Hardware:
+
+
 Adafruit
+
 Adafruit DC & Stepper Motor Bonnet for Raspberry Pi
 https://www.adafruit.com/product/4280
 
@@ -17,10 +20,16 @@ https://www.adafruit.com/product/2991
 
 Color Coded Header for Raspberry Pi
 https://www.adafruit.com/product/3907
+
+
 PiShop.ca
+
 Raspberry Pi Zero W
 https://www.pishop.ca/product/raspberry-pi-zero-w/
+
+
 Aliexpress
+
 Arca Swiss Plates
 2x PU70 Type B
 https://www.aliexpress.com/item/1005004095101551.html?spm=a2g0o.order_list.order_list_main.49.684718025XWOeY
@@ -71,7 +80,9 @@ https://www.aliexpress.com/item/1005001823789355.html?spm=a2g0o.order_list.order
 With Cable, 2PCS
 https://www.aliexpress.com/item/1005001834951972.html?spm=a2g0o.order_detail.order_detail_item.7.2fcff19cFD9bqY
 
+
 Amazon.ca
+
 LeMotech ABS Plastic Junction Box
 3.9"x2.7"x2"
 https://www.amazon.ca/gp/product/B07C97HXX8/ref=ppx_yo_dt_b_asin_title_o06_s00?ie=UTF8&th=1

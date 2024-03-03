@@ -51,7 +51,7 @@ class PiSlider:
         direction_combobox.grid(row=4, column=1, pady=10)
 
         ttk.Label(root, text="Select Movement Curve:").grid(row=5, column=0, pady=10)
-        distribution_combobox = ttk.Combobox(root, values=["catenary", "gaussian", "ellipsoidal", "parabolic", "cycloid", "lame_curve", "linear", "even", "exponential"], textvariable=self.distribution_var)
+        distribution_combobox = ttk.Combobox(root, values=["catenary", "gaussian", "ellipsoidal", "parabolic", "cycloid", "lame_curve", "linear", "even"], textvariable=self.distribution_var)
         distribution_combobox.grid(row=5, column=1, pady=10)
 
         ttk.Button(root, text="Invert Distribution", command=self.invert_distribution).grid(row=6, column=0, pady=10)
@@ -110,8 +110,6 @@ class PiSlider:
                         steps_distribution = self.linear_distribution(self.num_photos_var.get(), total_steps)
                     elif selected_distribution == "even":
                         steps_distribution = self.even_distribution(self.num_photos_var.get(), total_steps)
-                    elif selected_distribution == "exponential":
-                        steps_distribution = self.exponential_distribution(self.num_photos_var.get(), total_steps)
                     else:
                         print("Invalid distribution type. Exiting.")
                         self.cleanup_and_exit()
@@ -196,7 +194,7 @@ class PiSlider:
     def invert_distribution(self):
         current_distribution = self.distribution_var.get()
 
-        invertible_distributions = ["catenary", "gaussian", "ellipsoidal", "parabolic", "cycloid", "lame_curve", "linear", "even", "exponential"]
+        invertible_distributions = ["catenary", "gaussian", "ellipsoidal", "parabolic", "cycloid", "lame_curve", "linear", "even"]
 
         if current_distribution in invertible_distributions:
             distribution_function = getattr(self, f"{current_distribution}_distribution")
@@ -272,13 +270,6 @@ class PiSlider:
 
     def even_distribution(self, total_intervals, max_steps):
         return np.ones(total_intervals) * (max_steps / total_intervals)
-
-    def exponential_distribution(self, total_intervals, max_steps):
-        x = np.linspace(0, 1, total_intervals)
-        exponential_curve = max_steps * np.exp(-5 * x)  # Adjust the parameter as needed
-        normalized_curve = (exponential_curve - np.min(exponential_curve))
-        normalized_curve = (normalized_curve / (np.max(normalized_curve) - np.min(normalized_curve))) * max_steps
-        return normalized_curve.astype(int)
 
     def key_press_callback(self, event):
         if event.char == '`':

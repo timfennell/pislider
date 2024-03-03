@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+
+[Desktop Entry]
+Name=Pi Slider
+Exec=python3 Desktop/PiSlider/PiSlider.py
+Type=Application
+Icon=Desktop/PiSlider/pislider.png

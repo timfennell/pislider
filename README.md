@@ -67,7 +67,7 @@ Belt PU with Steel Core GT2 Belt 2GT Timing Belt Width 6mm
 https://www.aliexpress.com/item/1005003262891930.html?spm=a2g0o.order_list.order_list_main.32.684718025XWOeY
 
 20pcs/lot 2020 M3 M4 M5 T Block Square nuts
-M3
+M5
 https://www.aliexpress.com/item/1005003237906405.html?spm=a2g0o.order_list.order_list_main.33.684718025XWOeY
 
 4x 2.5mm 2Pole Male + 4x 2.5mm 2Pole Female

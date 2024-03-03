@@ -3,6 +3,7 @@ Raspberry Pi Controlled Motorized Camera Slider
 
 Hardware:
 
+I'm assuming you already have soldering and wiring hardware and tools available.
 
 Adafruit
 

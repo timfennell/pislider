@@ -167,7 +167,6 @@ class PiSlider:
 
     def initialize_gantry_position(self):
         try:
-            GPIO.setmode(GPIO.BCM)
 
             direction = 1 if self.direction_var.get() == 'left' else -1
 

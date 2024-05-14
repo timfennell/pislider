@@ -4,7 +4,7 @@ Raspberry Pi Controlled Motorized Camera Slider
 
 Two Notes:
 Check the MAPPING.png for the mapping of the pins on the motor bonnet to the Raspberry Pi.
-**** MAKE SURE YOU REMOVE RELEASE THE BELT FROM THE PULLEY BEFORE TRASPORTING THE SLIDER. If the gantry moves the motor, the stepper can generate a charge large enough to fry the RaspberryPi, even when everything is off.*****
+**** MAKE SURE YOU RELEASE THE BELT FROM THE PULLEY ON THE STEPPER MOTOR BEFORE TRASPORTING THE SLIDER. If the gantry moves the motor, the stepper can generate a charge large enough to fry the RaspberryPi, even when everything is off.*****
 
 Hardware:
 

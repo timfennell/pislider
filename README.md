@@ -1,6 +1,11 @@
 # pislider
 Raspberry Pi Controlled Motorized Camera Slider
 
+
+Two Notes:
+Check the MAPPING.png for the mapping of the pins on the motor bonnet to the Raspberry Pi.
+**** MAKE SURE YOU REMOVE RELEASE THE BELT FROM THE PULLEY BEFORE TRASPORTING THE SLIDER. If the gantry moves the motor, the stepper can generate a charge large enough to fry the RaspberryPi, even when everything is off.*****
+
 Hardware:
 
 I'm assuming you already have soldering and wiring hardware and tools available.
@@ -18,9 +23,6 @@ https://www.adafruit.com/product/2883
 
 USB Mini Hub with Power Switch - OTG Micro-USB
 https://www.adafruit.com/product/2991
-
-Color Coded Header for Raspberry Pi
-https://www.adafruit.com/product/3907
 
 
 PiShop.ca

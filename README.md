@@ -25,8 +25,8 @@ https://www.adafruit.com/product/3907
 
 PiShop.ca
 
-Raspberry Pi Zero W
-https://www.pishop.ca/product/raspberry-pi-zero-w/
+Raspberry Pi Zero 2 W
+https://www.pishop.ca/product/raspberry-pi-zero-w/](https://www.pishop.ca/product/raspberry-pi-zero-2-w-with-pre-soldered-headers
 
 
 Aliexpress

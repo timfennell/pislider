@@ -1,6 +1,9 @@
 # pislider
 Raspberry Pi Controlled Motorized Camera Slider
 
+See the video of my slider on YouTube
+https://youtu.be/Z4fMwQC2de0?si=qMtr0yOHDJthevD9
+
 
 Two Notes:
 

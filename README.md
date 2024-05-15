@@ -66,7 +66,7 @@ Black
 https://www.aliexpress.com/item/4001250519899.html?spm=a2g0o.order_list.order_list_main.39.684718025XWOeY
 
 X axis V-Slot profile 2040 Y axis synchronous belt Stretch Straighten tensioner
-X2 (must order 2)
+X2 (You must add two to your cart)
 https://www.aliexpress.com/item/1005003128683160.html?spm=a2g0o.order_list.order_list_main.31.684718025XWOeY
 
 Belt PU with Steel Core GT2 Belt 2GT Timing Belt Width 6mm

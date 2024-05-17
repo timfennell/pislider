@@ -103,7 +103,7 @@ class PiSliderApp:
     # Method for updating the curve image
     def update_curve_image(self, event=None):
         selected_distribution = self.distribution_var.get()
-        image_path = f"{selected_distribution}.png"
+        image_path = os.path.join(self.image_dir, f"{selected_distribution}.png")
         try:
             image = Image.open(image_path)
             image = image.resize((150, 150))  # Adjust size if needed

@@ -5,6 +5,7 @@ from tkinter import ttk
 import numpy as np
 import RPi.GPIO as GPIO
 import adafruit_motorkit
+from PIL import Image, ImageTk
 
 class PiSliderApp:
     def __init__(self, root):
@@ -53,7 +54,7 @@ class PiSliderApp:
         self.num_photos_var = tk.IntVar(value=1000)
         self.interval_var = tk.DoubleVar(value=8.0)
         self.exposure_pause_var = tk.DoubleVar(value=2.0)
-        self.distribution_var = tk.StringVar(value="catenary")
+        self.distribution_var = tk.StringVar(value="even")
 
         ttk.Label(self.root, text="Length:").grid(row=0, column=0, pady=10)
         ttk.Entry(self.root, textvariable=self.length_var).grid(row=0, column=1, pady=10)
@@ -86,8 +87,31 @@ class PiSliderApp:
         ], textvariable=self.distribution_var)
         distribution_combobox.grid(row=4, column=1, pady=10)
 
+        # Bind the event to update the curve image
+        distribution_combobox.bind("<<ComboboxSelected>>", self.update_curve_image)
+
+        # Add an Image widget
+        self.curve_image_label = tk.Label(self.root)
+        self.curve_image_label.grid(row=0, column=2, columnspan=2, sticky='ne', padx=(0, 10), pady=(10, 0))
+
+        # Display default image
+        self.update_curve_image()
+
         ttk.Button(self.root, text="Start", command=self.start_camera).grid(row=6, column=1, pady=10)
         ttk.Button(self.root, text="Stop", command=self.stop_camera).grid(row=6, column=2, pady=10)
+
+    # Method for updating the curve image
+    def update_curve_image(self, event=None):
+        selected_distribution = self.distribution_var.get()
+        image_path = f"{selected_distribution}.png"
+        try:
+            image = Image.open(image_path)
+            image = image.resize((150, 150))  # Adjust size if needed
+            photo = ImageTk.PhotoImage(image)
+            self.curve_image_label.config(image=photo)
+            self.curve_image_label.image = photo  # Keep reference to prevent garbage collection
+        except FileNotFoundError:
+            print(f"Image file {image_path} not found.")
 
     def start_camera(self):
         if not self.gantry_running:
@@ -141,6 +165,12 @@ class PiSliderApp:
                     remaining_interval_time = max(0, self.interval_var.get() - elapsed_time)
                     if remaining_interval_time > 0:
                         time.sleep(remaining_interval_time)
+
+                    # Check end switches
+                    if GPIO.input(self.END_SWITCH_1_PIN) == GPIO.LOW or GPIO.input(self.END_SWITCH_2_PIN) == GPIO.LOW:
+                        print("End switch triggered. Stopping program.")
+                        self.stop_camera()
+                        return
 
                     # Trigger the camera
                     GPIO.output(self.CAMERA_TRIGGER_PIN, GPIO.HIGH)
@@ -230,70 +260,77 @@ class PiSliderApp:
     def catenary_distribution(self, total_intervals, max_steps):
         x = np.linspace(-1, 1, total_intervals)
         catenary_curve = max_steps * (np.cosh(x) - 1)
-        return self.invert_distribution(catenary_curve)
+        catenary_curve = catenary_curve / np.max(catenary_curve) * max_steps
+        return catenary_curve.astype(int)
 
     def inverted_catenary_distribution(self, total_intervals, max_steps):
         x = np.linspace(-1, 1, total_intervals)
         catenary_curve = max_steps * (np.cosh(x) - 1)
-        inverted_curve = max_steps - catenary_curve + 1  # Inversion formula
+        catenary_curve = catenary_curve / np.max(catenary_curve) * max_steps
+        inverted_curve = max_steps - catenary_curve
         return inverted_curve.astype(int)
 
     def gaussian_distribution(self, total_intervals, max_steps):
-        x = np.linspace(-1, 1, total_intervals)
-        gaussian_curve = max_steps * np.exp(-0.5 * x**2)
-        normalized_curve = (gaussian_curve - np.min(gaussian_curve))
-        normalized_curve = (normalized_curve / (np.max(normalized_curve) - np.min(normalized_curve))) * max_steps
-        return self.invert_distribution(normalized_curve)
+        x = np.linspace(-3, 3, total_intervals)
+        gaussian_curve = max_steps * np.exp(-x ** 2)
+        gaussian_curve = gaussian_curve / np.max(gaussian_curve) * max_steps
+        return gaussian_curve.astype(int)
 
     def inverted_gaussian_distribution(self, total_intervals, max_steps):
-        x = np.linspace(-1, 1, total_intervals)
-        gaussian_curve = max_steps * np.exp(-0.5 * x**2)
-        inverted_curve = max_steps - gaussian_curve + np.min(gaussian_curve)  # Inversion formula
+        x = np.linspace(-3, 3, total_intervals)
+        gaussian_curve = max_steps * np.exp(-x ** 2)
+        gaussian_curve = gaussian_curve / np.max(gaussian_curve) * max_steps
+        inverted_curve = max_steps - gaussian_curve
         return inverted_curve.astype(int)
 
     def ellipsoidal_distribution(self, total_intervals, max_steps):
         x = np.linspace(-1, 1, total_intervals)
-        ellipsoidal_curve = max_steps * np.sqrt(1 - x**2)
-        return self.invert_distribution(ellipsoidal_curve)
+        ellipsoidal_curve = max_steps * (1 - x ** 2) ** 0.5
+        ellipsoidal_curve = ellipsoidal_curve / np.max(ellipsoidal_curve) * max_steps
+        return ellipsoidal_curve.astype(int)
 
     def inverted_ellipsoidal_distribution(self, total_intervals, max_steps):
         x = np.linspace(-1, 1, total_intervals)
-        ellipsoidal_curve = max_steps * np.sqrt(1 - x**2)
-        inverted_curve = max_steps - ellipsoidal_curve + np.min(ellipsoidal_curve)  # Inversion formula
+        ellipsoidal_curve = max_steps * (1 - x ** 2) ** 0.5
+        ellipsoidal_curve = ellipsoidal_curve / np.max(ellipsoidal_curve) * max_steps
+        inverted_curve = max_steps - ellipsoidal_curve
         return inverted_curve.astype(int)
 
     def parabolic_distribution(self, total_intervals, max_steps):
         x = np.linspace(-1, 1, total_intervals)
-        parabolic_curve = max_steps * (1 - x**2)
-        return self.invert_distribution(parabolic_curve)
+        parabolic_curve = max_steps * (1 - x ** 2)
+        parabolic_curve = parabolic_curve / np.max(parabolic_curve) * max_steps
+        return parabolic_curve.astype(int)
 
     def inverted_parabolic_distribution(self, total_intervals, max_steps):
         x = np.linspace(-1, 1, total_intervals)
-        parabolic_curve = max_steps * (1 - x**2)
-        inverted_curve = max_steps - parabolic_curve + 1  # Inversion formula
+        parabolic_curve = max_steps * (1 - x ** 2)
+        parabolic_curve = parabolic_curve / np.max(parabolic_curve) * max_steps
+        inverted_curve = max_steps - parabolic_curve
         return inverted_curve.astype(int)
 
     def cycloid_distribution(self, total_intervals, max_steps):
         x = np.linspace(-np.pi, np.pi, total_intervals)
-        cycloid_curve = max_steps * (1 - np.cos(x))
-        return self.invert_distribution(cycloid_curve)
+        cycloid_curve = max_steps * (1 - np.cos(x)) / 2  # Normalized to max_steps
+        return cycloid_curve.astype(int)
 
     def inverted_cycloid_distribution(self, total_intervals, max_steps):
         x = np.linspace(-np.pi, np.pi, total_intervals)
-        cycloid_curve = max_steps * (1 - np.cos(x))
-        inverted_curve = np.flip(cycloid_curve)  # Inversion
+        cycloid_curve = max_steps * (1 - np.cos(x)) / 2
+        inverted_curve = max_steps - cycloid_curve
         return inverted_curve.astype(int)
 
     def lame_curve_distribution(self, total_intervals, max_steps):
         x = np.linspace(-1, 1, total_intervals)
-        lame_curve = max_steps * np.abs(np.tan(x))
+        lame_curve = max_steps * (1 - x ** 10) ** 0.1
+        lame_curve = lame_curve / np.max(lame_curve) * max_steps
         return lame_curve.astype(int)
 
     def inverted_lame_curve_distribution(self, total_intervals, max_steps):
         x = np.linspace(-1, 1, total_intervals)
-        lame_curve = max_steps * np.abs(np.tan(x))
-        inverted_curve = max_steps - lame_curve + 1  # Inversion formula
-        inverted_curve[inverted_curve < 0] = 0  # Clip negative values to zero
+        lame_curve = max_steps * (1 - x ** 10) ** 0.1
+        lame_curve = lame_curve / np.max(lame_curve) * max_steps
+        inverted_curve = max_steps - lame_curve
         return inverted_curve.astype(int)
 
     def linear_distribution(self, total_intervals, max_steps):
@@ -302,14 +339,13 @@ class PiSliderApp:
 
     def inverted_linear_distribution(self, total_intervals, max_steps):
         linear_curve = np.linspace(0, max_steps, total_intervals)
-        inverted_curve = max_steps - linear_curve + 1  # Inversion formula
+        inverted_curve = max_steps - linear_curve
         return inverted_curve.astype(int)
 
     def even_distribution(self, total_intervals, max_steps):
-        return np.ones(total_intervals) * max_steps
-
-    def inverted_even_distribution(self, total_intervals, max_steps):
-        return np.zeros(total_intervals)  # All zeros for inverted even distribution
+        even_steps = max_steps / total_intervals
+        even_curve = np.full(total_intervals, even_steps)
+        return even_curve.astype(int)
 
     def invert_distribution(self, distribution):
         return np.flip(distribution)

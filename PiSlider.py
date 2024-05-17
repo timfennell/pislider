@@ -1,5 +1,4 @@
-import threading
-import os
+\import threading
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -7,12 +6,14 @@ import numpy as np
 import RPi.GPIO as GPIO
 import adafruit_motorkit
 from PIL import Image, ImageTk
+import os  # Ensure this import statement is present
 
 class PiSliderApp:
     def __init__(self, root):
         self.root = root
         self.direction_var = tk.StringVar(value='right')
         self.setup_gpio()
+        self.image_dir = "/home/tim/Desktop/PiSlider"  # Define the image directory before creating widgets
         self.create_widgets()
         self.gantry_running = False
         self.stop_flag = False
@@ -87,24 +88,21 @@ class PiSliderApp:
             "even", #"inverted_even"
         ], textvariable=self.distribution_var)
         distribution_combobox.grid(row=4, column=1, pady=10)
-
-        # Bind the event to update the curve image
         distribution_combobox.bind("<<ComboboxSelected>>", self.update_curve_image)
 
         # Add an Image widget
         self.curve_image_label = tk.Label(self.root)
-        self.curve_image_label.grid(row=0, column=2, columnspan=2, sticky='ne', padx=(0, 10), pady=(10, 0))
-
-        # Display default image
-        self.update_curve_image()
+        self.curve_image_label.grid(row=0, column=2, rowspan=6, padx=10, pady=10, sticky="ne")
 
         ttk.Button(self.root, text="Start", command=self.start_camera).grid(row=6, column=1, pady=10)
         ttk.Button(self.root, text="Stop", command=self.stop_camera).grid(row=6, column=2, pady=10)
 
+        self.update_curve_image()  # Initialize the image display
+
     # Method for updating the curve image
     def update_curve_image(self, event=None):
         selected_distribution = self.distribution_var.get()
-        image_path = os.path.join(self.image_dir, f"{selected_distribution}.png")
+        image_path = os.path.join(self.image_dir, f"{selected_distribution}.png")  # Construct the image path
         try:
             image = Image.open(image_path)
             image = image.resize((150, 150))  # Adjust size if needed

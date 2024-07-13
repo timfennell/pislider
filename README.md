@@ -17,8 +17,13 @@ I'm assuming you already have soldering and wiring hardware and tools available.
 
 Adafruit
 
+#####
+No longer using the stepper motor bonnet. I switched to using DRV8826 Drivers.
+https://www.amazon.ca/dp/B0BLKPQ5NY
+
 Adafruit DC & Stepper Motor Bonnet for Raspberry Pi
 https://www.adafruit.com/product/4280
+####
 
 Stepper motor - NEMA-17 size - 200 steps/rev, 12V 350mA
 https://www.adafruit.com/product/324

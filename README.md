@@ -5,35 +5,13 @@ See the video of my slider on YouTube
 https://youtu.be/Z4fMwQC2de0?si=qMtr0yOHDJthevD9
 
 
-Two Notes:
-
-Check the MAPPING.png for the mapping of the pins on the motor bonnet to the Raspberry Pi.
-
-**** MAKE SURE YOU RELEASE THE BELT FROM THE PULLEY ON THE STEPPER MOTOR BEFORE TRASPORTING THE SLIDER. If the gantry moves the motor, the stepper can generate a charge large enough to fry the RaspberryPi, even when everything is off.*****
-
 Hardware:
 
-I'm assuming you already have soldering and wiring hardware and tools available.
+I built my own stepper driver hat for this version of the project based on TMC2209 Stepper Driver Modules and a Proto Breadboard HAT by MakerSpot.
+https://www.amazon.ca/dp/B0CJBK66KW?th=1
+https://www.amazon.ca/dp/B07B4TRVFD
 
-Adafruit
-
-#####
-No longer using the stepper motor bonnet. I switched to using DRV8826 Drivers.
-https://www.amazon.ca/dp/B0BLKPQ5NY
-
-Adafruit DC & Stepper Motor Bonnet for Raspberry Pi
-https://www.adafruit.com/product/4280
-####
-
-Stepper motor - NEMA-17 size - 200 steps/rev, 12V 350mA
-https://www.adafruit.com/product/324
-
-Adafruit Pi Protector for Raspberry Pi Model Zero
-https://www.adafruit.com/product/2883
-
-USB Mini Hub with Power Switch - OTG Micro-USB
-https://www.adafruit.com/product/2991
-
+I complete wiring diagram will be coming soon. I had wanted to design a PCB for the hat, but I need to learn how to use KiCad first.
 
 PiShop.ca
 

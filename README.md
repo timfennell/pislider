@@ -86,3 +86,94 @@ https://www.amazon.ca/gp/product/B00B2HOS08/ref=ppx_yo_dt_b_asin_title_o07_s00?i
 
 VIXLW 4K HDMI Video Capture Card,
 https://www.amazon.ca/gp/product/B0C77P1SM1/ref=ppx_yo_dt_b_asin_title_o00_s00?ie=UTF8&psc=1
+
+
+Project Dependencies
+This document lists all the hardware, system software, and Python libraries required to run the PiSlider project.
+
+1. Hardware
+This project is designed to run on a Raspberry Pi and control specific camera slider hardware.
+Computer: Raspberry Pi (Model 3B+ or newer recommended for performance).
+Motor Drivers: 2x TMC2209 stepper motor drivers configured for UART mode.
+Stepper Motors: 2x NEMA 17 stepper motors (or similar) for the slider and rotation axes.
+End-Stops: 2x Mechanical or optical end-stop switches.
+
+Camera Trigger:
+An S2-type shutter release cable for physical triggering.
+A USB cable for "USB Control" mode.
+Power Supply: A stable power supply sufficient for the Raspberry Pi and both stepper motors.
+2. System-Level Software
+These command-line tools must be installed on the Raspberry Pi OS for full functionality. They are used for USB camera control and image processing.
+Install them using apt:
+Generated bash
+sudo apt-get update
+sudo apt-get install gphoto2 dcraw -y
+Use code with caution.
+Bash
+gphoto2: The core utility for controlling digital cameras via USB. It is required for all "USB Control" features, including triggering, setting camera parameters, and downloading images.
+dcraw: A powerful RAW image decoder. It is used by the "Take Preview" feature to quickly extract a viewable JPEG from the camera's RAW file.
+3. Python Libraries
+These libraries are required for the Python scripts to run. They can be installed using the Python package manager, pip.
+Recommended Installation (using requirements.txt)
+The easiest way to install all Python dependencies at once is to use a requirements.txt file.
+Create a file named requirements.txt in your project directory.
+Copy and paste the following lines into that file:
+Generated code
+numpy
+pyserial
+RPi.GPIO
+Pillow
+astral==1.10.1
+pytz
+Use code with caution.
+Install all of them with a single command:
+Generated bash
+python3 -m pip install -r requirements.txt
+Use code with caution.
+Bash
+Manual Installation
+If you prefer to install them one by one, here are the libraries and their purpose:
+numpy: Used for numerical operations, especially for calculating the movement distribution curves.
+Generated bash
+python3 -m pip install numpy
+Use code with caution.
+Bash
+pyserial: Required for UART serial communication with the TMC2209 motor drivers.
+Generated bash
+python3 -m pip install pyserial
+Use code with caution.
+Bash
+RPi.GPIO: The standard library for controlling the Raspberry Pi's GPIO pins (for motors, end-stops, and the S2 trigger).
+Generated bash
+python3 -m pip install RPi.GPIO
+Use code with caution.
+Bash
+Pillow: A modern fork of the Python Imaging Library (PIL). It is used for handling the distribution curve images and the camera preview images in the GUI.
+Generated bash
+python3 -m pip install Pillow
+Use code with caution.
+Bash
+astral: Used by the Holy Grail controller to calculate the sun's position based on time and location. Note: The code is specifically written for the older but stable version 1.x of this library.
+Generated bash
+# Install the specific version the code is compatible with
+python3 -m pip install astral==1.10.1
+Use code with caution.
+Bash
+pytz: Required by astral for handling timezones correctly.
+Generated bash
+python3 -m pip install pytz
+Use code with caution.
+Bash
+Note on "Externally Managed Environment"
+If you are running a very new version of Raspberry Pi OS, pip might give you an "externally-managed-environment" error. In this case, your OS prefers you to install libraries using apt. You can try installing them with sudo apt-get install python3-numpy python3-pil python3-serial, etc., but creating a virtual environment is the best long-term solution to avoid these issues.
+4. Included Python Libraries
+The following modules are used by the project but are part of Python's standard library, so no installation is needed for them:
+tkinter
+threading
+time
+os
+math
+logging
+enum
+subprocess
+json

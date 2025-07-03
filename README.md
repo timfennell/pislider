@@ -29,6 +29,27 @@ Fully Customizable:
 
 All Holy Grail parameters, including the exposure curve, aperture range, and ISO limits, are fully configurable through the GUI.
 
+Manual Trigger Mode
+
+The Manual Trigger Mode provides a flexible "shoot-move-shoot" workflow where the user, not a timer, decides when to take the next picture. This is ideal for situations where the timing of events is unpredictable, such as in stop-motion animation, photogrammetry, or when waiting for specific moments like a boat to pass or a crowd to clear.
+
+How It Works:
+
+Set Up the Sequence: In the GUI, you set up a timelapse sequence just like normal: define the total number of photos, the slider length, rotation angle, and distribution curves. The software pre-calculates the exact amount the slider and rotation axes need to move between each shot.
+Enable Manual Mode: In the Control Panel, select the "Manual Trigger" radio button. This disables the "Interval" setting, as the app will no longer use a timer.
+
+Start the Timelapse:
+
+The system takes the first photo immediately.
+After the first shot, it moves the gantry to the calculated position for the second shot and then stops.
+The motors will hold their position, and the app will wait indefinitely for your signal.
+
+Triggering the Next Shot:
+
+When you are ready, you can trigger the next "shot-move" cycle by pressing the Enter or Keypad-Enter key on a connected keyboard.
+The app will immediately take the next photo, then move the gantry to the position for the following shot, and wait again.
+This process repeats for the total number of photos you defined. It gives you complete control over the timing of your sequence while ensuring the motion between each shot is perfectly calculated and repeatable.
+
 
 Camera & Hardware Control:
 

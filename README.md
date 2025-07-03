@@ -8,9 +8,12 @@ This project is a powerful and flexible camera slider and motion control system 
 
 Core Features:
 
-Dual-Axis Control: Independently or simultaneously control linear slider movement and 360° panoramic rotation.
+Dual-Axis Control:
+Independently or simultaneously control linear slider movement and 360° panoramic rotation.
 Flexible Distribution Curves: Go beyond simple, linear movement. The system offers a wide array of mathematical distribution curves (e.g., Catenary, Gaussian, Parabolic, Cycloid) for both slider and rotation axes. This allows for smooth "ease-in" and "ease-out" effects, creating more dynamic and professional-looking timelapses.
-Object Tracking: Automatically calculate the correct rotation angles to keep the camera pointed at a stationary subject as the slider moves, perfect for parallax effects.
+
+Object Tracking:
+Automatically calculate the correct rotation angles to keep the camera pointed at a stationary subject as the slider moves, perfect for parallax effects.
 Run Preview Mode: Safely test your entire programmed move without taking photos to ensure the motion, speed, and framing are exactly what you want before committing to a long shoot.
 
 

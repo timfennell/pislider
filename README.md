@@ -1,6 +1,36 @@
 # pislider
 Raspberry Pi Controlled Motorized Camera Slider/Rotation timelapse controller with advanced "Holy Grail" capabilities. The current version is designed to run on raspberry pi zero w2 and with a Sony A7III camera.
 
+Project Features
+Motion Control & Sequencing
+Dual-Axis Control: Simultaneous linear (slider) and rotational (pan) axis control.
+Advanced Movement Curves:
+Go beyond linear motion with a wide selection of distribution curves (Catenary, Gaussian, Parabolic, Cycloid, etc.) for smooth ease-in/ease-out effects.
+Apply different curves to the slider and rotation axes independently.
+Object Tracking (Parallax Effect): Automatically calculates the correct pan-axis rotation to keep a subject centered as the slider moves.
+Run Preview: Execute a full motion sequence without firing the camera shutter to verify framing, speed, and path before a long shoot.
+Manual Trigger Mode: A "shoot-move-shoot" workflow for stop-motion, photogrammetry, or event-based timelapses, triggered by a keypress instead of a timer.
+Manual Jogging: Use keyboard shortcuts to make fine manual adjustments to the slider and rotation axes when not running a sequence.
+Holy Grail Timelapse Mode
+Automated Day-to-Night / Night-to-Day: Captures seamless transitions by automatically ramping camera settings over long periods.
+Predictive Exposure Calculation: Uses time, latitude, and longitude to calculate the sun's position and determine the ideal exposure value (EV) for each shot.
+Full Exposure Control: Smoothly and intelligently adjusts Aperture, Shutter Speed, and ISO to match the target EV.
+Bulb Ramping: Automatically switches to and controls bulb mode for exposures longer than 30 seconds.
+Customizable Ramping Curve: The relationship between sun angle and target EV is fully editable via a JSON table in the GUI.
+Camera & Hardware Integration
+Dual Triggering Support:
+S2 Cable: Reliable physical triggering for any camera with an S2-type port.
+USB Control: Full camera control via gphoto2, enabling direct setting changes from the app.
+Live Preview: In USB mode, capture a full-resolution preview from the camera directly to the GUI to check focus and composition.
+Advanced Motor Management:
+Utilizes TMC2209 drivers in UART mode for software-based control.
+Features a user-selectable "Low Power" mode to reduce motor current, heat, and battery consumption for horizontal moves.
+Hardware End-Stops: Used for reliable homing and to prevent accidental hardware damage.
+User Interface & Experience
+Graphical User Interface: Easy-to-use GUI built with Tkinter for setting up and running all motion sequences.
+Real-Time Feedback: Displays a live countdown, photo count, and estimated time remaining during a timelapse.
+Visual Distribution Graphs: Instantly see a visual representation of the selected movement curve.
+
 Project Description & Capabilities
 
 This project is a powerful and flexible camera slider and motion control system designed to run on a Raspberry Pi. It provides a graphical user interface (GUI) built with Tkinter for controlling complex camera movements and shooting sequences for timelapse photography.

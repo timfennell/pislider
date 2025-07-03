@@ -3,7 +3,7 @@ Raspberry Pi Controlled Motorized Camera Slider/Rotation timelapse controller wi
 
 Project Description & Capabilities
 
-This project is a powerful and flexible camera slider and motion control system designed to run on a Raspberry Pi. It provides a graphical user interface (GUI) built with Tkinter for controlling complex camera movements and shooting sequences for timelapse, video, and panoramic photography.
+This project is a powerful and flexible camera slider and motion control system designed to run on a Raspberry Pi. It provides a graphical user interface (GUI) built with Tkinter for controlling complex camera movements and shooting sequences for timelapse photography.
 
 
 Core Features:

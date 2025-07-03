@@ -1,9 +1,43 @@
 # pislider
-Raspberry Pi Controlled Motorized Camera Slider
+Raspberry Pi Controlled Motorized Camera Slider/Rotation timelapse controller with advanced "Holy Grail" capabilities. The current version is designed to run on raspberry pi zero w2 and with a Sony A7III camera.
+
+Project Description & Capabilities
+
+This project is a powerful and flexible camera slider and motion control system designed to run on a Raspberry Pi. It provides a graphical user interface (GUI) built with Tkinter for controlling complex camera movements and shooting sequences for timelapse, video, and panoramic photography.
+
+
+Core Features:
+
+Dual-Axis Control: Independently or simultaneously control linear slider movement and 360° panoramic rotation.
+Flexible Distribution Curves: Go beyond simple, linear movement. The system offers a wide array of mathematical distribution curves (e.g., Catenary, Gaussian, Parabolic, Cycloid) for both slider and rotation axes. This allows for smooth "ease-in" and "ease-out" effects, creating more dynamic and professional-looking timelapses.
+Object Tracking: Automatically calculate the correct rotation angles to keep the camera pointed at a stationary subject as the slider moves, perfect for parallax effects.
+Run Preview Mode: Safely test your entire programmed move without taking photos to ensure the motion, speed, and framing are exactly what you want before committing to a long shoot.
+
+
+Holy Grail Timelapse Mode:
+
+This is the system's most advanced feature, designed to capture seamless day-to-night or night-to-day "Holy Grail" timelapses.
+Predictive Exposure Ramping: Based on your latitude, longitude, and the current time, the system automatically calculates the sun's position.
+Smooth Setting Adjustments: It then gradually and smoothly adjusts your camera's Aperture, Shutter Speed, and ISO over the entire sequence to perfectly compensate for the changing ambient light.
+Flicker-Free Results: By avoiding the sudden jumps in settings that a camera's auto-exposure would make, this mode produces exceptionally smooth, flicker-free results across massive changes in brightness.
+
+
+Fully Customizable:
+
+All Holy Grail parameters, including the exposure curve, aperture range, and ISO limits, are fully configurable through the GUI.
+
+
+Camera & Hardware Control:
+
+Dual Triggering Options:
+
+S2 Shutter Cable: A reliable, physical trigger for any camera with an S2-type port.
+USB Control: Full camera control via gphoto2 for supported cameras, allowing the app to manage settings directly.
+Live Preview: In USB Control mode, you can capture a full-resolution preview image from the camera and display it directly in the app to check focus and composition.
+Advanced Motor Control: Utilizes TMC2209 drivers in UART mode, enabling software control over motor current for features like a "Low Power" mode to conserve battery and reduce heat during less demanding horizontal moves.
 
 See the video of my slider on YouTube
 https://youtu.be/Z4fMwQC2de0?si=qMtr0yOHDJthevD9
-
 
 Hardware:
 

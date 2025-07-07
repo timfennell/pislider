@@ -1,144 +1,212 @@
+import time
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import logging
-import json
+import math
 import os
+from PIL import Image, ImageStat
 
-# This is the corrected import for modern astral libraries (v2 and newer)
-from astral.location import LocationInfo
-from astral.sun import sun
+try:
+    from astral.location import LocationInfo
+    from astral.sun import SunDirection
+except ImportError:
+    raise ImportError("Astral and Pytz are required for Holy Grail mode.")
 
 class HolyGrailController:
     """
-    The 'brains' of the Holy Grail timelapse.
-    (Corrected for modern Astral v2.x/v3.x syntax)
+    Manages Holy Grail timelapse exposure with a dynamic, time-based interval ramping model.
     """
-    DEFAULT_SETTINGS_TABLE = {
-        # sun_angle (degrees): [target_EV, kelvin_temp, tint_val]
-        "-20.0": [ -5.0, 3400, 10],
-        "-12.0": [ -3.0, 3600, 8],
-        "-6.0":  [  1.0, 4000, 5],
-        "0.0":   [  8.0, 5200, 0],
-        "6.0":   [ 12.0, 5800, 0],
-        "20.0":  [ 14.0, 5500, -5]
+    # --- Class Constants for Camera Settings and Behavior ---
+    STANDARD_APERTURES_F = [1.4, 1.8, 2.0, 2.8, 4.0, 5.6, 8.0, 11, 16, 22]
+    STANDARD_ISOS = [100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 12800, 25600]
+    STANDARD_SHUTTER_SPEEDS = {
+        '30': 30.0, '25': 25.0, '20': 20.0, '15': 15.0, '13': 13.0, '10': 10.0, '8': 8.0, '6': 6.0, '5': 5.0, '4': 4.0, '3.2': 3.2, '2.5': 2.5, '2': 2.0, '1.6': 1.6, '1.3': 1.3, '1': 1.0,
+        '0.8': 0.8, '0.6': 0.6, '0.5': 0.5, '0.4': 0.4, '1/3': 1/3.0, '1/4': 1/4.0, '1/5': 1/5.0, '1/6': 1/6.0, '1/8': 1/8.0, '1/10': 1/10.0, '1/13': 1/13.0, '1/15': 1/15.0, '1/20': 1/20.0, '1/25': 1/25.0,
+        '1/30': 1/30.0, '1/40': 1/40.0, '1/50': 1/50.0, '1/60': 1/60.0, '1/80': 1/80.0, '1/100': 1/100.0, '1/125': 1/125.0, '1/160': 1/160.0, '1/200': 1/200.0, '1/250': 1/250.0,
+        '1/320': 1/320.0, '1/400': 1/400.0, '1/500': 1/500.0, '1/640': 1/640.0, '1/800': 1/800.0, '1/1000': 1/1000.0, '1/1250': 1/1250.0, '1/1600': 1/1600.0,
+        '1/2000': 1/2000.0, '1/2500': 1/2500.0, '1/3200': 1/3200.0, '1/4000': 1/4000.0, '1/5000': 1/5000.0, '1/6400': 1/6400.0, '1/8000': 1/8000.0
     }
+    SHUTTER_VALUES = sorted(STANDARD_SHUTTER_SPEEDS.values())
+    SHUTTER_STRINGS = sorted(STANDARD_SHUTTER_SPEEDS, key=STANDARD_SHUTTER_SPEEDS.get)
+    DEFAULT_EV_TABLE = { -20.0: [-5.0, 3400], -12.0: [-3.0, 3600], -6.0:  [1.0, 4000], 0.0: [8.0, 5200], 6.0: [12.0, 5800], 20.0: [14.0, 5500] }
+    MIN_INTERVAL_SAFETY_BUFFER_S = 3.0
+    INTERVAL_SMOOTHING_FACTOR = 0.4
 
-    def __init__(self, lat, lon, settings_table_str):
-        self.latitude = lat
-        self.longitude = lon
-        
-        try:
-            with open('/etc/timezone') as f:
-                self.timezone_str = f.read().strip()
-        except (FileNotFoundError, IOError):
-            logging.warning("Could not detect system timezone from /etc/timezone. Falling back to UTC.")
-            self.timezone_str = 'UTC'
-        logging.info(f"Auto-detected system timezone: {self.timezone_str}")
-        
-        try:
-            self.settings_table = json.loads(settings_table_str)
-            sorted_angles = sorted([float(k) for k in self.settings_table.keys()])
-            self.sun_angles = np.array(sorted_angles)
-            self.target_evs = np.array([self.settings_table[str(k)][0] for k in sorted_angles])
-            self.kelvin_vals = np.array([self.settings_table[str(k)][1] for k in sorted_angles])
-            self.tint_vals = np.array([self.settings_table[str(k)][2] for k in sorted_angles])
-            logging.info("Holy Grail Controller initialized successfully with custom settings.")
-        except Exception as e:
-            logging.error(f"Failed to parse Holy Grail settings table: {e}. Falling back to default.")
-            self.settings_table = self.DEFAULT_SETTINGS_TABLE
-            sorted_angles = sorted([float(k) for k in self.settings_table.keys()])
-            self.sun_angles = np.array(sorted_angles)
-            self.target_evs = np.array([self.settings_table[str(k)][0] for k in sorted_angles])
-            self.kelvin_vals = np.array([self.settings_table[str(k)][1] for k in sorted_angles])
-            self.tint_vals = np.array([self.settings_table[str(k)][2] for k in sorted_angles])
+    def __init__(self, lat, lon, settings_table_dict, day_interval_s, sunset_interval_s, night_interval_s):
+        self.latitude, self.longitude = lat, lon
+        self.day_interval_s, self.sunset_interval_s, self.night_interval_s = day_interval_s, sunset_interval_s, night_interval_s
+        self.anchor_ev, self.anchor_sun_angle, self.reactive_ev_offset, self.last_exposure_duration = None, None, 0.0, 1.0
+        self.target_brightness, self.deadband_threshold, self.last_sun_elevation = 115, 10.0, 0.0
+        self.last_used_interval = self.day_interval_s
 
         try:
-            # This block uses the correct modern astral syntax
-            self.location = LocationInfo(
-                "PiSliderLocation",
-                "Region",
-                self.timezone_str,
-                self.latitude,
-                self.longitude
-            )
+            tz_path = os.path.realpath('/etc/localtime')
+            self.timezone_str = tz_path.split('/usr/share/zoneinfo/')[-1]
+        except Exception: self.timezone_str = 'UTC'
+        
+        ev_table = settings_table_dict or self.DEFAULT_EV_TABLE
+        ev_sorted_angles = sorted(ev_table.keys())
+        self.ev_sun_angles = np.array(ev_sorted_angles)
+        self.target_evs = np.array([ev_table[k][0] for k in ev_sorted_angles])
+        self.kelvin_vals = np.array([ev_table[k][1] for k in ev_sorted_angles])
+        
+        self.interval_sun_angles = None
+        self.target_intervals = None
+
+        try:
             self.tz = pytz.timezone(self.timezone_str)
+            self.location = LocationInfo("PiSlider", "Earth", self.timezone_str, self.latitude, self.longitude)
+            logging.info(f"HolyGrailController initialized with timezone: {self.timezone_str}")
+            self._create_dynamic_interval_table()
         except Exception as e:
-            logging.error(f"Failed to initialize Astral location object: {e}", exc_info=True)
-            raise ValueError("Invalid Latitude or Longitude for Holy Grail.")
+            raise ValueError(f"Invalid timezone or location for Holy Grail: {e}")
 
-    def get_current_settings(self, min_aperture, max_aperture, base_iso, max_iso):
+    def _create_dynamic_interval_table(self):
+        logging.info("Creating dynamic interval ramping table based on today's sunset.")
         now = datetime.now(self.tz)
-        
         try:
-            # --- THIS IS THE CORRECTED CALL FOR MODERN ASTRAL ---
-            # Call the 'sun' function and get the 'elevation' from the resulting dictionary
-            s = sun(self.location.observer, date=now, tzinfo=self.tz)
-            elevation = s['elevation']
-        except Exception as e:
-            logging.error(f"Could not calculate sun elevation: {e}")
-            elevation = 0
+            sunset_dt = self.location.sun(date=now.date(), local=True, direction=SunDirection.SETTING)['sunset']
             
-        target_ev = np.interp(elevation, self.sun_angles, self.target_evs)
-        target_kelvin = int(round(np.interp(elevation, self.sun_angles, self.kelvin_vals) / 100.0)) * 100
-        target_tint = int(round(np.interp(elevation, self.sun_angles, self.tint_vals)))
+            pre_ramp_start_dt = sunset_dt - timedelta(minutes=50)
+            pre_ramp_end_dt = sunset_dt - timedelta(minutes=10)
+            post_ramp_start_dt = sunset_dt + timedelta(minutes=10)
+            post_ramp_end_dt = sunset_dt + timedelta(minutes=50)
 
-        if min_aperture == max_aperture:
-            target_aperture_val = min_aperture
+            pre_ramp_start_angle = self.location.solar_elevation(pre_ramp_start_dt)
+            pre_ramp_end_angle = self.location.solar_elevation(pre_ramp_end_dt)
+            post_ramp_start_angle = self.location.solar_elevation(post_ramp_start_dt)
+            post_ramp_end_angle = self.location.solar_elevation(post_ramp_end_dt)
+
+            logging.info(f"Day->Sunset ramp: {pre_ramp_start_angle:.2f}° to {pre_ramp_end_angle:.2f}°")
+            logging.info(f"Sunset->Night ramp: {post_ramp_start_angle:.2f}° to {post_ramp_end_angle:.2f}°")
+
+            keyframes = {
+                -18.0: self.night_interval_s,
+                post_ramp_end_angle: self.night_interval_s,
+                post_ramp_start_angle: self.sunset_interval_s,
+                pre_ramp_end_angle: self.sunset_interval_s,
+                pre_ramp_start_angle: self.day_interval_s,
+                20.0: self.day_interval_s,
+            }
+            
+            # <<< FIX: The sun angles MUST be sorted in ascending (increasing) order for np.interp.
+            # The 'reverse=True' was incorrect and has been removed.
+            sorted_angles = sorted(keyframes.keys())
+            self.interval_sun_angles = np.array(sorted_angles)
+            self.target_intervals = np.array([keyframes[angle] for angle in sorted_angles])
+
+        except Exception as e:
+            logging.error(f"Could not calculate dynamic sunset-based ramps: {e}. Falling back to simple table.", exc_info=True)
+            self.interval_sun_angles = np.array([-18.0, -6.0, 0.0, 20.0])
+            self.target_intervals = np.array([self.night_interval_s, self.sunset_interval_s, self.day_interval_s, self.day_interval_s])
+
+    def _update_sun_elevation(self, execution_timestamp):
+        try:
+            self.location.observer.date = datetime.fromtimestamp(execution_timestamp, self.tz)
+            self.last_sun_elevation = self.location.observer.elevation
+        except Exception as e: logging.error(f"Could not calculate sun elevation: {e}", exc_info=True)
+
+    def calibrate(self, image_path, camera_iso, camera_aperture, camera_shutter_s):
+        logging.info(f"Calibrating with user settings: ISO {camera_iso}, f/{camera_aperture}, {camera_shutter_s}s")
+        measured_ev = math.log2((camera_aperture**2 * 100) / (camera_iso * camera_shutter_s))
+        measured_brightness = self._get_image_brightness(image_path)
+        if measured_brightness is None: return False
+        metering_error_ev = math.log2(self.target_brightness / measured_brightness)
+        self.anchor_ev = measured_ev - metering_error_ev
+        self._update_sun_elevation(time.time())
+        self.anchor_sun_angle = self.last_sun_elevation
+        self.reactive_ev_offset = 0.0
+        self.last_used_interval = self.day_interval_s
+        logging.info(f"Calibration complete. Anchor EV set to: {self.anchor_ev:+.2f} at sun angle {self.anchor_sun_angle:.2f}°")
+        return True
+
+    def get_next_shot_parameters(self, min_aperture, max_aperture, base_iso, max_iso, execution_timestamp = None):
+        if not execution_timestamp:
+            execution_timestamp = time.time()
+        self._update_sun_elevation(execution_timestamp)
+
+        predictive_ev_now = np.interp(self.last_sun_elevation, self.ev_sun_angles, self.target_evs)
+        if self.anchor_ev is not None and self.anchor_sun_angle is not None:
+            predictive_ev_at_anchor = np.interp(self.anchor_sun_angle, self.ev_sun_angles, self.target_evs)
+            delta_ev = predictive_ev_now - predictive_ev_at_anchor
+            target_ev = self.anchor_ev + delta_ev + self.reactive_ev_offset
         else:
-            min_sun_angle = self.sun_angles[0]
-            max_sun_angle = self.sun_angles[-1]
-            if max_sun_angle == min_sun_angle:
-                 target_aperture_val = min_aperture
-            else:
-                target_aperture_val = np.interp(elevation,
-                                                [min_sun_angle, max_sun_angle],
-                                                [min_aperture, max_aperture])
+            target_ev = predictive_ev_now + self.reactive_ev_offset
+        logging.info(f"Target EV: {target_ev:.2f} (Reactive Offset: {self.reactive_ev_offset:+.2f})")
+
+        target_kelvin = int(np.interp(self.last_sun_elevation, self.ev_sun_angles, self.kelvin_vals))
+
+        blended_interval = np.interp(self.last_sun_elevation, self.interval_sun_angles, self.target_intervals)
         
-        final_aperture_val = np.clip(target_aperture_val, min(min_aperture, max_aperture), max(min_aperture, max_aperture))
-        final_aperture_str = self._find_closest_aperture(final_aperture_val)
+        current_aperture, current_iso = min_aperture, base_iso
+        exposure_duration = 0
+        while True:
+            shutter_s = (current_aperture**2 * 100) / (2**target_ev * current_iso)
+            if 1/8000 < shutter_s <= 30.0:
+                exposure_settings = self._package_settings('normal', current_iso, shutter_s, 0, current_aperture, target_kelvin)
+                exposure_duration = shutter_s
+                break
+            if shutter_s > 30.0:
+                if current_iso < max_iso:
+                    next_iso_index = np.searchsorted(self.STANDARD_ISOS, current_iso, side='right')
+                    if next_iso_index < len(self.STANDARD_ISOS): current_iso = self.STANDARD_ISOS[next_iso_index]; continue
+                exposure_settings = self._package_settings('bulb', max_iso, 0, shutter_s, current_aperture, target_kelvin)
+                exposure_duration = shutter_s
+                break
+            if shutter_s <= 1/8000:
+                if current_aperture < max_aperture:
+                    next_ap_index = np.searchsorted(self.STANDARD_APERTURES_F, current_aperture, side='right')
+                    if next_ap_index < len(self.STANDARD_APERTURES_F): current_aperture = self.STANDARD_APERTURES_F[next_ap_index]; continue
+                exposure_settings = self._package_settings('normal', base_iso, 1/8000, 0, current_aperture, target_kelvin)
+                exposure_duration = 1/8000
+                break
+        
+        required_interval = exposure_duration + self.MIN_INTERVAL_SAFETY_BUFFER_S
+        new_target_interval = max(blended_interval, required_interval)
+        final_interval = (self.last_used_interval * (1 - self.INTERVAL_SMOOTHING_FACTOR)) + \
+                         (new_target_interval * self.INTERVAL_SMOOTHING_FACTOR)
+        self.last_used_interval = final_interval
+        exposure_settings['target_interval'] = final_interval
+        
+        return exposure_settings
 
-        exposure = self._calculate_exposure(target_ev, final_aperture_val, base_iso, max_iso)
+    def update_exposure_offset(self, image_path):
+        measured_brightness = self._get_image_brightness(image_path)
+        if measured_brightness is None: return
+        if abs(measured_brightness - self.target_brightness) < self.deadband_threshold: return
+        smoothing_factor = self._calculate_dynamic_smoothing_factor()
+        immediate_ev_error = math.log2(self.target_brightness / measured_brightness)
+        self.reactive_ev_offset += immediate_ev_error * smoothing_factor
+        self.reactive_ev_offset = np.clip(self.reactive_ev_offset, -1.5, 1.5)
+        logging.debug(f"ReactiveUpdate: Measured={measured_brightness:.1f}, ErrorEV={immediate_ev_error:+.2f}, NewReactiveOffset={self.reactive_ev_offset:+.2f}")
 
-        final_settings = {
-            'aperture': final_aperture_str,
-            'kelvin': target_kelvin,
-            'tint': target_tint,
-            **exposure
-        }
-        return final_settings
+    def _calculate_dynamic_smoothing_factor(self):
+        base_factor = 0.02; sun_points = [-18, -12, -6, 0, 6, 12, 18]; sun_mults  = [1.0, 1.5, 2.5, 3.0, 2.5, 1.5, 1.0]
+        sun_angle_multiplier = np.interp(self.last_sun_elevation, sun_points, sun_mults)
+        return base_factor * sun_angle_multiplier
 
-    def _calculate_exposure(self, target_ev, aperture_val, base_iso, max_iso):
-        current_iso = base_iso
-        required_time = (aperture_val**2) / (2**(target_ev + np.log2(current_iso / 100.0)))
+    def _get_image_brightness(self, image_path: str) -> float | None:
+        try:
+            with Image.open(image_path) as img:
+                width, height = img.size; crop_percent = 0.60
+                left, top = (width - width * crop_percent) / 2, (height - height * crop_percent) / 2
+                right, bottom = (width + width * crop_percent) / 2, (height + height * crop_percent) / 2
+                center_cropped_img = img.crop((left, top, right, bottom))
+                grayscale_img = center_cropped_img.convert('L')
+                stats = ImageStat.Stat(grayscale_img)
+                return max(1.0, stats.mean[0])
+        except Exception as e:
+            logging.error(f"Failed to analyze image brightness for '{image_path}': {e}"); return None
 
-        if 0.000125 < required_time <= 30:
-            return { 'mode': 'standard', 'iso': current_iso, 'shutter': self._find_closest_shutter(required_time), 'bulb_duration': None }
-        if required_time > 30:
-            required_iso = current_iso * (required_time / 30.0)
-            if required_iso <= max_iso:
-                final_iso = self._find_closest_iso(required_iso)
-                final_time = (aperture_val**2) / (2**(target_ev + np.log2(final_iso / 100.0)))
-                return { 'mode': 'standard', 'iso': final_iso, 'shutter': self._find_closest_shutter(final_time), 'bulb_duration': None }
-            else:
-                final_time_at_max_iso = (aperture_val**2) / (2**(target_ev + np.log2(max_iso / 100.0)))
-                return { 'mode': 'bulb', 'iso': max_iso, 'shutter': 'bulb', 'bulb_duration': final_time_at_max_iso }
-        if required_time <= 0.000125:
-            return { 'mode': 'standard', 'iso': base_iso, 'shutter': '1/8000', 'bulb_duration': None }
+    def _find_closest(self, value, candidates, return_values=None):
+        candidates = np.asarray(candidates)
+        idx = (np.abs(candidates - value)).argmin()
+        return return_values[idx] if return_values is not None else candidates[idx]
 
-    def _find_closest_aperture(self, f_val):
-        values = [1.0, 1.1, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.5, 2.8, 3.2, 3.5, 4.0, 4.5, 5.0, 5.6, 6.3, 7.1, 8.0, 9.0, 10, 11, 13, 14, 16, 18, 20, 22]
-        strings = [f"{v:.1f}" for v in values]
-        idx = (np.abs(np.array(values) - f_val)).argmin()
-        return strings[idx]
-
-    def _find_closest_shutter(self, time_sec):
-        speeds = [30, 25, 20, 15, 13, 10, 8, 6, 5, 4, 3.2, 2.5, 2, 1.6, 1.3, 1, 0.8, 0.6, 0.5, 0.4, 1/3, 1/4, 1/5, 1/6, 1/8, 1/10, 1/13, 1/15, 1/20, 1/25, 1/30, 1/40, 1/50, 1/60, 1/80, 1/100, 1/125, 1/160, 1/200, 1/250, 1/320, 1/400, 1/500, 1/640, 1/800, 1/1000, 1/1250, 1/1600, 1/2000, 1/2500, 1/3200, 1/4000, 1/5000, 1/6400, 1/8000]
-        strings = ['30', '25', '20', '15', '13', '10', '8', '6', '5', '4', '3.2', '2.5', '2', '1.6', '1.3', '1', '0.8', '0.6', '0.5', '0.4', '1/3', '1/4', '1/5', '1/6', '1/8', '1/10', '1/13', '1/15', '1/20', '1/25', '1/30', '1/40', '1/50', '1/60', '1/80', '1/100', '1/125', '1/160', '1/200', '1/250', '1/320', '1/400', '1/500', '1/640', '1/800', '1/1000', '1/1250', '1/1600', '1/2000', '1/2500', '1/3200', '1/4000', '1/5000', '1/6400', '1/8000']
-        idx = (np.abs(np.array(speeds) - time_sec)).argmin()
-        return strings[idx]
-
-    def _find_closest_iso(self, iso_val):
-        isos = [50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25600]
-        idx = (np.abs(np.array(isos) - iso_val)).argmin()
-        return isos[idx]
+    def _package_settings(self, mode, iso, shutter_s, bulb_s, aperture_f, kelvin):
+        final_iso = self._find_closest(iso, self.STANDARD_ISOS)
+        final_aperture = self._find_closest(aperture_f, self.STANDARD_APERTURES_F)
+        shutter_str = 'bulb' if mode == 'bulb' else self._find_closest(shutter_s, self.SHUTTER_VALUES, self.SHUTTER_STRINGS)
+        self.last_exposure_duration = bulb_s if mode == 'bulb' else shutter_s
+        return {'mode': mode, 'iso': final_iso, 'shutter': shutter_str, 'bulb_duration': bulb_s, 'aperture': f"{final_aperture:.1f}", 'kelvin': kelvin, 'ev_offset': self.reactive_ev_offset, 'target_interval': 0}

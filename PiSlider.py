@@ -11,7 +11,7 @@ import logging
 # Local project imports
 from gui import PiSliderGUI
 from holygrail import HolyGrailController
-from hardware import HardwareController, CameraController, ROTATION_EN_PIN, ROTATION_DIR_PIN, ROTATION_STEP_PIN
+from hardware import HardwareController, CameraController, ROTATION_EN_PIN, ROTATION_DIR_PIN, ROTATION_STEP_PIN, AUX_TRIGGER_PIN
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(threadName)s - %(message)s')
@@ -31,15 +31,13 @@ class PiSliderApp:
         self.stop_flag = threading.Event()
         self.operation_thread = None
         self.preview_thread = None
-        self.camera_check_thread = None # <<< Add this line
+        self.camera_check_thread = None
 
-        # Add the lock for thread-safe camera access
         self.camera_lock = threading.Lock()
 
         try:
             self.hardware = HardwareController()
             self.hardware.set_stop_flag_reference(self.stop_flag)
-            # Pass the lock to the CameraController
             self.camera = CameraController(self.hardware, self.camera_lock)
         except Exception as e:
             logging.critical(f"FATAL: Hardware initialization failed: {e}", exc_info=True)
@@ -56,6 +54,9 @@ class PiSliderApp:
         self.combined_intervals = []
         self.steps_distribution = np.array([])
         self.force_interval = False
+        
+        self.aux_trigger_fired = threading.Event()
+        self.aux_trigger_thread = None
 
         self.anchor_ev = None
         self.anchor_sun_angle = None
@@ -83,8 +84,14 @@ class PiSliderApp:
         self.holygrail_longitude_var = tkinter.StringVar(value="-82.521721")
         self.holygrail_min_aperture_var = tkinter.DoubleVar(value=2.8)
         self.holygrail_max_aperture_var = tkinter.DoubleVar(value=11.0)
-        self.holygrail_base_iso_var = tkinter.IntVar(value=100)
-        self.holygrail_max_iso_var = tkinter.IntVar(value=6400)
+        
+        # --- START OF MODIFICATION: Add new "Smart ISO" and "Crossfade" variables ---
+        self.holygrail_day_iso_var = tkinter.IntVar(value=100)
+        self.holygrail_night_iso_var = tkinter.IntVar(value=640)
+        self.holygrail_max_transition_iso_var = tkinter.IntVar(value=5000)
+        self.holygrail_iso_transition_frames_var = tkinter.IntVar(value=30)
+        # --- END OF MODIFICATION ---
+        
         self.holygrail_day_interval_var = tkinter.DoubleVar(value=10.0)
         self.holygrail_sunset_interval_var = tkinter.DoubleVar(value=4.0)
         self.holygrail_night_interval_var = tkinter.DoubleVar(value=35.0)
@@ -109,6 +116,9 @@ class PiSliderApp:
         self.on_camera_mode_change()
         if self.camera.gphoto2_available:
             self.root.after(500, self.check_camera_connection)
+
+        self.aux_trigger_thread = threading.Thread(target=self._run_aux_trigger_listener_thread, daemon=True, name="AuxTriggerListener")
+        self.aux_trigger_thread.start()
 
     def get_holygrail_settings_from_ui(self):
         settings_dict = {}
@@ -136,6 +146,7 @@ class PiSliderApp:
         self.photos_taken = 0
         self.photo_count_var.set(f"Photos: 0 / {self.num_photos_var.get()}")
         self.time_remaining_var.set("Time Rem: Estimating...")
+        self.aux_trigger_fired.clear()
 
         self.operation_thread = threading.Thread(target=self._run_timelapse_thread, daemon=True, name="TimelapseThread")
         self.operation_thread.start()
@@ -155,14 +166,17 @@ class PiSliderApp:
         try:
             if self.holygrail_enabled_var.get():
                 hg_settings = self.get_holygrail_settings_from_ui()
+                # --- START OF MODIFICATION: Pass all new params to controller ---
                 self.holygrail_controller = HolyGrailController(
                     lat=float(self.holygrail_latitude_var.get()),
                     lon=float(self.holygrail_longitude_var.get()),
                     settings_table_dict=hg_settings,
                     day_interval_s=self.holygrail_day_interval_var.get(),
                     sunset_interval_s=self.holygrail_sunset_interval_var.get(),
-                    night_interval_s=self.holygrail_night_interval_var.get()
+                    night_interval_s=self.holygrail_night_interval_var.get(),
+                    iso_transition_duration_frames=self.holygrail_iso_transition_frames_var.get()
                 )
+                # --- END OF MODIFICATION ---
                 if self.anchor_ev is not None and self.anchor_sun_angle is not None:
                     self.holygrail_controller.anchor_ev = self.anchor_ev
                     self.holygrail_controller.anchor_sun_angle = self.anchor_sun_angle
@@ -175,7 +189,7 @@ class PiSliderApp:
 
             if length_mm > 0:
                 self.hardware.move_to_end(homing_dir_is_left)
-                if self.stop_flag.is_set(): return # Allow stop during homing
+                if self.stop_flag.is_set(): return
                 time.sleep(MOVEMENT_BUFFER)
 
             if not self.stop_flag.is_set():
@@ -203,67 +217,63 @@ class PiSliderApp:
         total_photos = self.num_photos_var.get()
         is_hg_mode = self.holygrail_enabled_var.get()
         
-        # This ensures shots happen at a consistent interval
-        next_trigger_time = time.time()
+        next_interval_start_time = time.time()
 
         for i in range(total_photos):
             if self.stop_flag.is_set(): break
-            self.photos_taken = i + 1
-
-            # 1. Wait until it's time for the next shot
-            wait_time = next_trigger_time - time.time()
+            
+            wait_time = next_interval_start_time - time.time()
             if wait_time > 0:
-                if self.stop_flag.wait(wait_time): break # Wait, but allow stopping
+                if self.stop_flag.wait(wait_time): break
             
             if self.stop_flag.is_set(): break
+            start_of_interval = time.time()
 
-            # 2. Capture the start time for this iteration
-            start_of_shot_actions = time.time()
-            target_interval = 0
-
-            # 3. Get settings, trigger photo, and (for HG) analyze it
-            if is_hg_mode:
-                try:
-                    params = self.holygrail_controller.get_next_shot_parameters(
-                        min_aperture=self.holygrail_min_aperture_var.get(),
-                        max_aperture=self.holygrail_max_aperture_var.get(),
-                        base_iso=self.holygrail_base_iso_var.get(),
-                        max_iso=self.holygrail_max_iso_var.get(),
-                        execution_timestamp = start_of_shot_actions
-                    )
-                    target_interval = params['target_interval']
-                    self.root.after(0, lambda s=params: self._update_live_settings_ui(s))
-                    self.camera.apply_settings(params)
-                    
-                    image_path = f"/tmp/hg_shot_{i:04d}.jpg"
-                    if self.camera.capture_and_download(image_path):
-                         self.holygrail_controller.update_exposure_offset(image_path)
-                         self.root.after(0, lambda p=image_path: self.gui.update_preview_image(p))
-                    else:
-                        logging.warning(f"Shot {i}: Failed to capture/download image, skipping reactive update.")
-
-                except Exception as e:
-                    logging.error(f"Failed during Holy Grail shot {i}: {e}", exc_info=True)
-                    messagebox.showerror("Camera Error", f"Failed during Holy Grail shot: {e}")
-                    break # Stop the timelapse on critical camera error
+            self._perform_motor_moves(i)
+            if self.stop_flag.wait(1.0): break
             
-            else: # Not Holy Grail mode
-                target_interval = self.interval_var.get()
-                self.camera.trigger_photo()
-                # Wait for a fixed post-shot pause to let the camera write to card
-                if self.stop_flag.wait(POST_SHOT_PAUSE): break
-
+            self.photos_taken = i + 1
             self.root.after(0, lambda: self.photo_count_var.set(f"Photos: {self.photos_taken} / {total_photos}"))
 
-            # 4. Perform motor moves
-            self._perform_motor_moves(i)
+            if self.aux_trigger_fired.is_set():
+                logging.info(f"Shot {i+1}: Aux trigger captured photo for this interval. Skipping scheduled shot.")
+                self.aux_trigger_fired.clear()
+            else:
+                if is_hg_mode:
+                    try:
+                        params = self.holygrail_controller.get_next_shot_parameters(
+                            min_aperture=self.holygrail_min_aperture_var.get(),
+                            max_aperture=self.holygrail_max_aperture_var.get(),
+                            day_iso=self.holygrail_day_iso_var.get(),
+                            night_native_iso=self.holygrail_night_iso_var.get(),
+                            max_transition_iso=self.holygrail_max_transition_iso_var.get(),
+                            execution_timestamp=start_of_interval
+                        )
+                        self.root.after(0, lambda s=params: self._update_live_settings_ui(s))
+                        self.camera.apply_settings(params)
+                        
+                        image_path = f"/tmp/hg_shot_{i:04d}.jpg"
+                        if self.camera.capture_and_download(image_path):
+                             self.holygrail_controller.update_exposure_offset(image_path)
+                             self.root.after(0, lambda p=image_path: self.gui.update_preview_image(p))
+                        else:
+                            logging.warning(f"Shot {i+1}: Failed to capture/download image, skipping reactive update.")
+
+                    except Exception as e:
+                        logging.error(f"Failed during Holy Grail shot {i+1}: {e}", exc_info=True)
+                        self.root.after(0, lambda e=e: messagebox.showerror("Camera Error", f"Failed during Holy Grail shot: {e}"))
+                        break
+                else:
+                    self.camera.trigger_photo()
+                    if self.stop_flag.wait(POST_SHOT_PAUSE): break
+
+            target_interval = 0
+            if is_hg_mode and self.holygrail_controller:
+                target_interval = self.holygrail_controller.last_used_interval
+            else:
+                target_interval = self.interval_var.get()
             
-            # 5. Add a pause for vibrations to settle before the next shot
-            if self.stop_flag.wait(1.0): break
-
-            # 6. Set the time for the next shot and update UI
-            next_trigger_time = start_of_shot_actions + target_interval
-
+            next_interval_start_time = start_of_interval + target_interval
             rem_time_s = target_interval * (total_photos - self.photos_taken)
             self.root.after(0, lambda s=rem_time_s: self.time_remaining_var.set(f"Time Rem: ~{self.format_time(s)}"))
 
@@ -283,14 +293,12 @@ class PiSliderApp:
 
     def _perform_motor_moves(self, interval_index):
         self.motors_moving = True
-        slider_steps = 0
-        rotation_steps = 0
+        slider_steps, rotation_steps = 0, 0
         if interval_index < len(self.combined_intervals):
             interval_data = self.combined_intervals[interval_index]
             slider_steps = interval_data.get('slider_steps', 0)
             rotation_steps = interval_data.get('rotation_steps', 0)
 
-            # Use root.after for thread-safe UI updates
             self.root.after(0, lambda s=slider_steps: self.live_slider_steps_var.set(str(s)))
             self.root.after(0, lambda r=rotation_steps: self.live_rotation_steps_var.set(str(r)))
 
@@ -308,6 +316,18 @@ class PiSliderApp:
             self.root.after(100, lambda: self.live_rotation_steps_var.set("--"))
         self.motors_moving = False
 
+    def _run_aux_trigger_listener_thread(self):
+        logging.info("Auxiliary trigger listener thread started.")
+        while not self.stop_flag.is_set():
+            if self.gantry_running and self.holygrail_enabled_var.get():
+                if GPIO.input(AUX_TRIGGER_PIN) == GPIO.LOW:
+                    if not self.aux_trigger_fired.is_set():
+                        logging.info("Auxiliary trigger detected by hardware! Firing camera and setting flag.")
+                        self.camera.trigger_photo()
+                        self.aux_trigger_fired.set()
+            time.sleep(0.05)
+        logging.info("Auxiliary trigger listener thread stopped.")
+
     def monitor_operation_thread(self):
         if self.operation_thread and self.operation_thread.is_alive():
             self.root.after(100, self.monitor_operation_thread)
@@ -322,12 +342,15 @@ class PiSliderApp:
             if messagebox.askyesno("Confirm Exit", "Operation in progress. Stop and exit?"):
                 self.stop_flag.set()
                 if self.operation_thread: self.operation_thread.join(timeout=5.0)
+                if self.aux_trigger_thread: self.aux_trigger_thread.join(timeout=1.0)
                 self.cleanup_and_exit_app()
         else:
             self.cleanup_and_exit_app()
 
     def cleanup_and_exit_app(self):
         self.stop_flag.set()
+        if self.aux_trigger_thread and self.aux_trigger_thread.is_alive():
+             self.aux_trigger_thread.join(timeout=1.0)
         if self.camera: self.camera.cleanup()
         if self.root.winfo_exists(): self.root.destroy()
         logging.info("--- PiSlider Application Shutdown ---")
@@ -376,7 +399,6 @@ class PiSliderApp:
             if self.gui.camera_trigger_combo: self.gui.camera_trigger_combo.config(state="readonly")
         self.on_camera_mode_change()
 
-    # <<< FIX: Re-enabled and corrected the camera check button logic
     def check_camera_connection(self):
         if not self.camera.gphoto2_available:
             self.camera_status_var.set("Status: gphoto2 not installed.")
@@ -386,25 +408,21 @@ class PiSliderApp:
             return
 
         def _threaded_check():
-            # Disable button and set status from the main thread
             self.root.after(0, lambda: self.gui.check_camera_button.config(state=tkinter.DISABLED))
             self.root.after(0, lambda: self.camera_status_var.set("Status: Checking..."))
 
             summary = self.camera.get_camera_summary()
 
-            # Update final status from the main thread
             self.root.after(0, lambda s=summary: self.camera_status_var.set(f"Status: {s}"))
             if self.root.winfo_exists():
                 if "Connected" in summary:
                     self.root.after(0, lambda: self.gui.camera_status_label.config(foreground='green'))
                 else:
                     self.root.after(0, lambda: self.gui.camera_status_label.config(foreground='red'))
-                # Re-enable the button
                 self.root.after(0, lambda: self.gui.check_camera_button.config(state=tkinter.NORMAL))
 
         self.camera_check_thread = threading.Thread(target=_threaded_check, daemon=True, name="CameraCheckThread")
         self.camera_check_thread.start()
-
 
     def on_camera_mode_change(self, event=None):
         self.camera.set_trigger_mode(self.camera_trigger_mode_var.get())
@@ -418,7 +436,6 @@ class PiSliderApp:
             if self.gui.camera_status_label: self.gui.camera_status_label.config(foreground='blue')
         else:
             self.camera_status_var.set("Status: USB Mode (Unknown Connection)")
-            # This logic was slightly wrong, fixing it to be more intuitive
             if self.gui.camera_status_label: self.gui.camera_status_label.config(foreground='black' if is_usb else 'blue')
 
     def calibrate_holygrail_exposure(self):
@@ -434,25 +451,19 @@ class PiSliderApp:
             self.root.after(0, lambda: self.gui.update_ui_for_run_state(True))
             self.root.after(0, lambda: self.calibration_offset_var.set("Reading settings..."))
             try:
-                logging.info("Attempting to read camera settings...")
                 iso_str = self.camera.get_config_value("iso")
                 aperture_str = self.camera.get_config_value("f-number")
                 shutter_str = self.camera.get_config_value("shutterspeed")
                 user_iso = int(iso_str)
                 user_aperture = float(aperture_str[2:]) if aperture_str.startswith('f/') else float(aperture_str)
                 user_shutter_s = self.camera.get_shutter_s(shutter_str)
-                logging.info(f"Camera settings: ISO={user_iso}, Aperture={user_aperture}, Shutter={user_shutter_s}")
             except Exception as e:
                 logging.error(f"Could not read camera settings for calibration: {e}")
-                self.root.after(0, lambda: self.calibration_offset_var.set("Read Failed"))
-                self.root.after(0, lambda: self.gui.update_ui_for_run_state(False))
-                return
+                self.root.after(0, lambda: self.calibration_offset_var.set("Read Failed")); self.root.after(0, lambda: self.gui.update_ui_for_run_state(False)); return
 
             self.root.after(0, lambda: self.calibration_offset_var.set("Capturing..."))
             image_path = "/tmp/hg_calib.jpg"
-            logging.info(f"Attempting to capture and download image to {image_path}...")
             if self.camera.capture_and_download(image_path):
-                logging.info(f"Successfully captured and downloaded image to {image_path}")
                 self.root.after(0, lambda p=image_path: self.gui.update_preview_image(p))
                 hg_settings = self.get_holygrail_settings_from_ui()
                 controller = HolyGrailController(float(self.holygrail_latitude_var.get()), float(self.holygrail_longitude_var.get()), hg_settings, self.holygrail_day_interval_var.get(), self.holygrail_sunset_interval_var.get(), self.holygrail_night_interval_var.get())
@@ -460,18 +471,11 @@ class PiSliderApp:
                     self.anchor_ev = controller.anchor_ev
                     self.anchor_sun_angle = controller.anchor_sun_angle
                     self.root.after(0, lambda: self.calibration_offset_var.set(f"Anchor EV: {self.anchor_ev:+.2f}"))
-                    logging.info("Calibration process completed successfully.")
-                else:
-                    self.root.after(0, lambda: self.calibration_offset_var.set("Analysis Failed"))
-                    logging.warning("Calibration process failed during analysis.")
             else:
                 self.root.after(0, lambda: self.calibration_offset_var.set("Capture Failed"))
-                logging.warning("Calibration process failed to capture image")
-
             self.root.after(0, lambda: self.gui.update_ui_for_run_state(False))
 
-        self.preview_thread = threading.Thread(target=run_calib, daemon=True)
-        self.preview_thread.start()
+        self.preview_thread = threading.Thread(target=run_calib, daemon=True); self.preview_thread.start()
 
     def take_preview(self):
         if not self.camera.gphoto2_available or self.camera.trigger_mode != 'USB Control':
@@ -491,8 +495,7 @@ class PiSliderApp:
             if self.root.winfo_exists():
                 self.root.after(0, lambda: self.gui.take_preview_button.config(state=tkinter.NORMAL))
 
-        self.preview_thread = threading.Thread(target=run_preview, daemon=True)
-        self.preview_thread.start()
+        self.preview_thread = threading.Thread(target=run_preview, daemon=True); self.preview_thread.start()
 
     def validate_inputs(self):
         try:
@@ -500,8 +503,8 @@ class PiSliderApp:
             if self.num_photos_var.get() <= 0: raise ValueError("Num photos must be > 0.")
             if self.holygrail_enabled_var.get():
                 float(self.holygrail_latitude_var.get()); float(self.holygrail_longitude_var.get())
-                if self.holygrail_min_aperture_var.get() <= 0 or self.holygrail_max_aperture_var.get() <= 0 or self.holygrail_base_iso_var.get() <= 0 or self.holygrail_max_iso_var.get() <= 0:
-                    raise ValueError("Aperture and ISO values must be positive.")
+                if self.holygrail_min_aperture_var.get() <= 0 or self.holygrail_max_aperture_var.get() <= 0 or self.holygrail_day_iso_var.get() <= 0 or self.holygrail_night_iso_var.get() <= 0 or self.holygrail_max_transition_iso_var.get() <= 0 or self.holygrail_iso_transition_frames_var.get() <= 0:
+                    raise ValueError("Aperture, ISO, and Transition Frame values must be positive.")
             return True
         except (ValueError, tkinter.TclError) as e:
             messagebox.showerror("Input Error", f"Invalid input value: {e}"); return False
@@ -516,12 +519,9 @@ class PiSliderApp:
             total_min_speed_pulses = min_speed_pulses * num_photos
             slider_func = self.distribution_functions.get(self.distribution_var.get(), self.even_distribution)
             if total_min_speed_pulses >= self.total_steps and self.total_steps > 0:
-                slider_raw = slider_func(num_photos)
-                self.steps_distribution = self.scale_array_to_sum(slider_raw, self.total_steps)
+                self.steps_distribution = self.scale_array_to_sum(slider_func(num_photos), self.total_steps)
             else:
-                curve_slider_pulses = self.total_steps - total_min_speed_pulses
-                slider_raw = slider_func(num_photos)
-                base_distribution = self.scale_array_to_sum(slider_raw, curve_slider_pulses)
+                base_distribution = self.scale_array_to_sum(slider_func(num_photos), self.total_steps - total_min_speed_pulses)
                 self.steps_distribution = base_distribution + min_speed_pulses
             if self.total_steps > 0 and self.steps_distribution.size > 0 and np.sum(self.steps_distribution) != self.total_steps: self.steps_distribution[-1] += self.total_steps - np.sum(self.steps_distribution)
             rot_angle = self.rotation_angle_var.get()

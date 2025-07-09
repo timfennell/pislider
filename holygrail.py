@@ -32,10 +32,8 @@ class HolyGrailController:
     MIN_INTERVAL_SAFETY_BUFFER_S = 3.0
     INTERVAL_SMOOTHING_FACTOR = 0.025
 
-    # --- START OF MODIFICATION: Add ISO transition parameters ---
     def __init__(self, lat, lon, settings_table_dict, day_interval_s, sunset_interval_s, night_interval_s,
                  interval_smoothing_factor=None, iso_transition_duration_frames=30):
-    # --- END OF MODIFICATION ---
         self.latitude, self.longitude = lat, lon
         self.day_interval_s, self.sunset_interval_s, self.night_interval_s = day_interval_s, sunset_interval_s, night_interval_s
         self.anchor_ev, self.anchor_sun_angle, self.reactive_ev_offset, self.last_exposure_duration = None, None, 0.0, 1.0
@@ -43,11 +41,9 @@ class HolyGrailController:
         self.last_used_interval = self.day_interval_s
         self.interval_smoothing_factor = interval_smoothing_factor if interval_smoothing_factor is not None else self.INTERVAL_SMOOTHING_FACTOR
         
-        # --- START OF MODIFICATION: Add transition state variables ---
         self.is_in_iso_transition = False
         self.iso_transition_frame_count = 0
         self.iso_transition_duration_frames = iso_transition_duration_frames
-        # --- END OF MODIFICATION ---
 
         try:
             tz_path = os.path.realpath('/etc/localtime')
@@ -55,10 +51,21 @@ class HolyGrailController:
         except Exception: self.timezone_str = 'UTC'
         
         ev_table = settings_table_dict or self.DEFAULT_EV_TABLE
-        ev_sorted_angles = sorted(ev_table.keys())
-        self.ev_sun_angles = np.array(ev_sorted_angles)
-        self.target_evs = np.array([ev_table[k][0] for k in ev_sorted_angles])
-        self.kelvin_vals = np.array([ev_table[k][1] for k in ev_sorted_angles])
+        
+        # --- START OF CRITICAL FIX: Enforce robust sorting for interpolation ---
+        # 1. Create a list of (angle, [ev, kelvin]) items.
+        table_items = list(ev_table.items())
+        
+        # 2. Sort the list of items based on the angle (the first element of each item).
+        table_items.sort(key=lambda item: item[0])
+        
+        # 3. Unpack the now-sorted items into the final numpy arrays.
+        # This guarantees that the sun angles are monotonically increasing and
+        # that the EV and Kelvin values correspond to the correct angles.
+        self.ev_sun_angles = np.array([item[0] for item in table_items])
+        self.target_evs = np.array([item[1][0] for item in table_items])
+        self.kelvin_vals = np.array([item[1][1] for item in table_items])
+        # --- END OF CRITICAL FIX ---
         
         self.interval_sun_angles = None
         self.target_intervals = None
@@ -132,7 +139,6 @@ class HolyGrailController:
         eased_progress = self._ease_in_out_normalized(progress)
         return y_start + eased_progress * (y_end - y_start)
 
-    # --- START OF MODIFICATION: Complete rework for "Crossfade" State Machine ---
     def get_next_shot_parameters(self, min_aperture, max_aperture, day_iso, night_native_iso, max_transition_iso, execution_timestamp=None):
         if not execution_timestamp:
             execution_timestamp = time.time()
@@ -145,26 +151,24 @@ class HolyGrailController:
             target_ev = self.anchor_ev + delta_ev + self.reactive_ev_offset
         else:
             target_ev = predictive_ev_now + self.reactive_ev_offset
-        logging.info(f"Target EV: {target_ev:.2f} (Reactive Offset: {self.reactive_ev_offset:+.2f})")
+        logging.info(f"Target EV: {target_ev:.2f} (Sun Angle: {self.last_sun_elevation:.2f}°, Reactive Offset: {self.reactive_ev_offset:+.2f})")
 
         target_kelvin = int(np.interp(self.last_sun_elevation, self.ev_sun_angles, self.kelvin_vals))
         blended_interval = self._eased_interp(self.last_sun_elevation, self.interval_sun_angles, self.target_intervals)
         exposure_duration = 0
         exposure_settings = {}
         
-        current_aperture = min_aperture # Aperture is assumed constant for this logic
+        current_aperture = min_aperture
 
-        # --- STATE 1: In the ISO ramp-down transition ---
+        # STATE 1: In the ISO ramp-down transition
         if self.is_in_iso_transition:
             self.iso_transition_frame_count += 1
             progress = min(1.0, self.iso_transition_frame_count / self.iso_transition_duration_frames)
             eased_progress = self._ease_in_out_normalized(progress)
             
-            # Interpolate ISO from high to low
             transition_iso_range = max_transition_iso - night_native_iso
             current_iso = max_transition_iso - (eased_progress * transition_iso_range)
 
-            # Calculate the required bulb duration at this new interpolated ISO
             bulb_duration_s = (current_aperture**2 * 100) / (2**target_ev * current_iso)
             
             logging.info(f"ISO Transition frame {self.iso_transition_frame_count}/{self.iso_transition_duration_frames}: ISO {current_iso:.0f}, Bulb {bulb_duration_s:.2f}s")
@@ -176,39 +180,36 @@ class HolyGrailController:
                 self.is_in_iso_transition = False
                 logging.info("ISO transition to Night Native ISO complete.")
         
-        # --- STATE 2: Normal operation (not yet transitioning) ---
+        # STATE 2: Normal operation (not yet transitioning)
         else:
-            current_iso = day_iso # Start with base day ISO
+            current_iso = day_iso
             while True:
                 shutter_s = (current_aperture**2 * 100) / (2**target_ev * current_iso)
 
                 if shutter_s > 30.0:
-                    # Shutter is too long. Can we increase ISO?
                     if current_iso < max_transition_iso:
                         next_iso_index = np.searchsorted(self.STANDARD_ISOS, current_iso, side='right')
                         if next_iso_index < len(self.STANDARD_ISOS):
                             next_iso = self.STANDARD_ISOS[next_iso_index]
                             if next_iso <= max_transition_iso:
                                 current_iso = next_iso
-                                continue # Rerun loop with higher ISO
+                                continue
                     
-                    # If we can't/won't increase ISO, it's time to START the transition
                     logging.info(f"Max transition ISO ({max_transition_iso}) reached. Starting smooth ISO ramp-down to bulb mode.")
                     self.is_in_iso_transition = True
                     self.iso_transition_frame_count = 0
                     
-                    # For this first frame, use bulb mode at the CURRENT high ISO
                     bulb_duration_s = shutter_s
                     exposure_settings = self._package_settings('bulb', current_iso, 0, bulb_duration_s, current_aperture, target_kelvin)
                     exposure_duration = bulb_duration_s
                     break
 
-                elif shutter_s <= 1/8000: # Shutter is too fast
+                elif shutter_s <= 1/8000:
                     exposure_settings = self._package_settings('normal', current_iso, 1/8000, 0, current_aperture, target_kelvin)
                     exposure_duration = 1/8000
                     break
                 
-                else: # Shutter is in normal range
+                else:
                     exposure_settings = self._package_settings('normal', current_iso, shutter_s, 0, current_aperture, target_kelvin)
                     exposure_duration = shutter_s
                     break
@@ -221,7 +222,6 @@ class HolyGrailController:
         exposure_settings['target_interval'] = final_interval
         
         return exposure_settings
-    # --- END OF MODIFICATION ---
 
     def update_exposure_offset(self, image_path):
         measured_brightness = self._get_image_brightness(image_path)

@@ -1,6 +1,8 @@
 # pislider
 Raspberry Pi Controlled Motorized Camera Slider/Rotation timelapse controller with advanced "Holy Grail" capabilities. The current version is designed to run on raspberry pi zero w2 and with a Sony A7III camera.
 
+*** PLEASE NOTE THE HOLY GRAIL LOGIC IS STILL BEING DEVELOPED, IT STILL NEEDS ADJUSTING!!!  ***
+
 Project Features
 Motion Control & Sequencing
 Dual-Axis Control: Simultaneous linear (slider) and rotational (pan) axis control.

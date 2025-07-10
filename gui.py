@@ -58,6 +58,17 @@ class PiSliderGUI:
 
     def _create_main_settings_widgets(self, parent_frame):
         parent_frame.columnconfigure(1, weight=1); current_row = 0
+        
+        save_frame = ttk.Frame(parent_frame)
+        save_frame.grid(row=current_row, column=0, columnspan=2, sticky='ew', pady=(0, 10))
+        save_frame.columnconfigure(1, weight=1)
+        ttk.Label(save_frame, text="Save Location:").grid(row=0, column=0, sticky='w')
+        self.save_path_combo = ttk.Combobox(save_frame, textvariable=self.app.save_path_var, state="readonly")
+        self.save_path_combo.grid(row=0, column=1, sticky='ew', padx=5)
+        self.refresh_drives_button = ttk.Button(save_frame, text="Refresh", command=self.app.detect_storage_paths, width=8)
+        self.refresh_drives_button.grid(row=0, column=2, sticky='e')
+        current_row += 1
+
         ttk.Label(parent_frame, text="Slider Settings", font=self.bold_font).grid(row=current_row, column=0, columnspan=2, pady=5, sticky=tkinter.W); current_row += 1
         ttk.Label(parent_frame, text="Direction:").grid(row=current_row, column=0, sticky=tkinter.W); self.direction_combo = ttk.Combobox(parent_frame, textvariable=self.app.direction_var, values=['right', 'left'], width=18, state="readonly"); self.direction_combo.grid(row=current_row, column=1, sticky=tkinter.E); current_row += 1
         ttk.Label(parent_frame, text="Length (mm):").grid(row=current_row, column=0, sticky=tkinter.W); self.length_entry = ttk.Entry(parent_frame, textvariable=self.app.length_var, width=20); self.length_entry.grid(row=current_row, column=1, sticky=tkinter.E); current_row += 1
@@ -101,10 +112,7 @@ class PiSliderGUI:
         ttk.Label(self.loc_frame, text="Day ISO:").grid(row=loc_row, column=0, sticky='w', padx=5, pady=2); day_iso_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_day_iso_var); day_iso_entry.grid(row=loc_row, column=1, sticky='ew', padx=5); loc_row += 1
         ttk.Label(self.loc_frame, text="Night Native ISO:").grid(row=loc_row, column=0, sticky='w', padx=5, pady=2); night_iso_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_night_iso_var); night_iso_entry.grid(row=loc_row, column=1, sticky='ew', padx=5); loc_row += 1
         ttk.Label(self.loc_frame, text="Max Transition ISO:").grid(row=loc_row, column=0, sticky='w', padx=5, pady=2); max_trans_iso_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_max_transition_iso_var); max_trans_iso_entry.grid(row=loc_row, column=1, sticky='ew', padx=5); loc_row += 1
-        
-        # --- START OF MODIFICATION: Add ISO transition duration setting ---
         ttk.Label(self.loc_frame, text="ISO Transition Frames:").grid(row=loc_row, column=0, sticky='w', padx=5, pady=2); iso_trans_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_iso_transition_frames_var); iso_trans_entry.grid(row=loc_row, column=1, sticky='ew', padx=5); loc_row += 1
-        # --- END OF MODIFICATION ---
 
         self.day_interval_label = ttk.Label(self.loc_frame, text="Day Interval (s):"); self.day_interval_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_day_interval_var)
         self.sunset_interval_label = ttk.Label(self.loc_frame, text="Sunset Interval (s):"); self.sunset_interval_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_sunset_interval_var)
@@ -166,13 +174,13 @@ class PiSliderGUI:
 
     def update_ui_for_run_state(self, is_running):
         state = tkinter.DISABLED if is_running else tkinter.NORMAL
-        self.start_button.config(state=state); self.preview_button.config(state=state); self.take_preview_button.config(state=state); self.check_camera_button.config(state=state)
+        self.start_button.config(state=state); self.preview_button.config(state=state); self.take_preview_button.config(state=state); self.check_camera_button.config(state=state); self.refresh_drives_button.config(state=state)
         if is_running or not (self.app.holygrail_enabled_var.get() and self.app.camera.gphoto2_available): self.calibrate_button.config(state=tkinter.DISABLED)
         else: self.calibrate_button.config(state=tkinter.NORMAL)
         self.stop_button.config(state=tkinter.NORMAL if is_running else tkinter.DISABLED)
         for widget in self.app.entry_widgets:
             if widget.winfo_exists(): widget.config(state=state)
-        for combo in [self.direction_combo, self.distribution_combo, self.rotation_direction_combo, self.rotation_distribution_combo, self.camera_trigger_combo, self.post_timelapse_combo]:
+        for combo in [self.direction_combo, self.distribution_combo, self.rotation_direction_combo, self.rotation_distribution_combo, self.camera_trigger_combo, self.post_timelapse_combo, self.save_path_combo]:
             if combo.winfo_exists(): combo.config(state="readonly" if not is_running else tkinter.DISABLED)
 
     def update_mode_widgets(self):
@@ -207,15 +215,10 @@ class PiSliderGUI:
             img_w, img_h = img.size
             container_w = self.preview_frame.winfo_width()
             
-            if container_w < 100:
-                target_w = 800
-                target_h = int(target_w * (img_h / img_w))
-            else:
-                target_w = self.preview_frame.winfo_width()
-                target_h = self.preview_frame.winfo_height()
-
-            img.thumbnail((target_w - 20, target_h - 20), Image.Resampling.LANCZOS)
+            if container_w < 100: target_w = 800; target_h = int(target_w * (img_h / img_w))
+            else: target_w = self.preview_frame.winfo_width(); target_h = self.preview_frame.winfo_height()
             
+            img.thumbnail((target_w - 20, target_h - 20), Image.Resampling.LANCZOS)
             self.app.preview_photo_image = ImageTk.PhotoImage(img)
             self.preview_image_label.config(image=self.app.preview_photo_image, text="")
         except Exception as e:
@@ -224,7 +227,7 @@ class PiSliderGUI:
 
     def update_distribution_image(self, event=None):
         key = self.app.distribution_var.get(); image_name = self.app.distribution_images.get(key)
-        if image_name:
+        if image_name and isinstance(image_name, str):
             try:
                 script_dir = os.path.dirname(os.path.realpath(__file__))
                 image_path = os.path.join(script_dir, "images", image_name)
@@ -238,5 +241,12 @@ class PiSliderGUI:
                 self.distribution_image_label.config(image='', text="Img not found")
 
     def show_holygrail_help(self):
-        help_text = "For Holy Grail mode to work, please set your camera to:\n\n1. Mode Dial: Manual (M)\n2. File Format: RAW or RAW+JPEG\n3. USB Connection: PC Remote"
+        help_text = "For Holy Grail mode to work, please set your camera to:\n\n" \
+                    "1. Mode Dial: Manual (M)\n\n" \
+                    "2. File Format: RAW Only\n" \
+                    "   (The system will generate previews automatically)\n\n" \
+                    "3. USB Connection: PC Remote / Tethering\n\n" \
+                    "4. Turn OFF Long Exposure Noise Reduction (LENR)\n" \
+                    "   (This prevents the camera from taking dark frames)"
+                    
         messagebox.showinfo("Holy Grail Setup Help", help_text, parent=self.root)

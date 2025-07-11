@@ -35,7 +35,19 @@ class CameraController:
         self.hardware = hardware_controller
         self.lock = lock
         self.trigger_mode = 'S2 Cable'
-        self.gphoto2_available = self.check_gphoto2()
+        
+        try:
+            subprocess.run(['killall', 'gphoto2'], capture_output=True, text=True)
+            logging.info("Ran pre-emptive 'killall gphoto2' to ensure clean state.")
+        except FileNotFoundError:
+            logging.warning("'killall' command not found. Cannot pre-emptively kill processes.")
+        
+        try:
+            self.gphoto2_available = self.check_gphoto2()
+        except Exception as e:
+            logging.error(f"Initial gphoto2 check failed after multiple attempts. USB control will be disabled. Error: {e}")
+            self.gphoto2_available = False
+
         logging.info(f"gphoto2 availability: {self.gphoto2_available}")
         if self.gphoto2_available:
             logging.info("USB control is available. Ensure your camera is set to 'PC Remote'.")
@@ -45,7 +57,6 @@ class CameraController:
             process = None
             for attempt in range(retries + 1):
                 try:
-                    # This pre-emptive check can help wake a sleeping camera
                     subprocess.run(
                         ['gphoto2', '--auto-detect'],
                         capture_output=True, text=True, timeout=10, check=False
@@ -96,16 +107,24 @@ class CameraController:
         raise RuntimeError(f"Could not get config value for '{config_name}'")
 
     def check_gphoto2(self):
-        try:
-            logging.debug("Checking gphoto2 version...")
-            result = subprocess.run(['gphoto2', '--version'], capture_output=True, text=True, timeout=5, check=True)
-            if "gphoto2" in result.stdout:
-                logging.info("gphoto2 is available.")
-                return True
-            return False
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logging.warning(f"gphoto2 not available or check failed: {e}")
-            return False
+        max_attempts = 5
+        delay_between_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            logging.info(f"gphoto2 check, attempt {attempt}/{max_attempts}...")
+            try:
+                result = subprocess.run(['gphoto2', '--auto-detect'], capture_output=True, text=True, timeout=4, check=True)
+                if "Model" in result.stdout and "Port" in result.stdout:
+                    logging.info(f"gphoto2 check successful on attempt {attempt}.")
+                    return True
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                logging.warning(f"Attempt {attempt} failed: {e}. Retrying in {delay_between_attempts}s...")
+                if attempt < max_attempts:
+                    time.sleep(delay_between_attempts)
+            except FileNotFoundError:
+                logging.error("gphoto2 command not found. Please ensure it is installed.")
+                raise
+        
+        raise RuntimeError("gphoto2 check failed after all attempts. Camera not detected or ready.")
 
     def set_trigger_mode(self, mode):
         self.trigger_mode = 'S2 Cable' if mode == 'USB Control' and not self.gphoto2_available else mode
@@ -167,7 +186,7 @@ class CameraController:
             os.environ['PREVIEW_PATH'] = download_preview_path
             command.insert(2, f'--hook-script={hook_script_path}')
         
-        result = self._run_gphoto2_command(command, timeout=45)
+        result = self._run_gphoto2_command(command, timeout=120)
         
         if 'PREVIEW_PATH' in os.environ:
             del os.environ['PREVIEW_PATH']

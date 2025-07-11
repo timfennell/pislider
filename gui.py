@@ -106,6 +106,7 @@ class PiSliderGUI:
         loc_row = 0
         ttk.Label(self.loc_frame, text="Latitude:").grid(row=loc_row, column=0, sticky='w', padx=5, pady=2); lat_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_latitude_var); lat_entry.grid(row=loc_row, column=1, sticky='ew', padx=5); loc_row += 1
         ttk.Label(self.loc_frame, text="Longitude:").grid(row=loc_row, column=0, sticky='w', padx=5, pady=2); lon_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_longitude_var); lon_entry.grid(row=loc_row, column=1, sticky='ew', padx=5); loc_row += 1
+        ttk.Label(self.loc_frame, text="Timezone:").grid(row=loc_row, column=0, sticky='w', padx=5, pady=2); tz_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_timezone_var); tz_entry.grid(row=loc_row, column=1, sticky='ew', padx=5); loc_row += 1
         ttk.Label(self.loc_frame, text="Min Aperture (f/):").grid(row=loc_row, column=0, sticky='w', padx=5, pady=2); min_ap_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_min_aperture_var); min_ap_entry.grid(row=loc_row, column=1, sticky='ew', padx=5); loc_row += 1
         ttk.Label(self.loc_frame, text="Max Aperture (f/):").grid(row=loc_row, column=0, sticky='w', padx=5, pady=2); max_ap_entry = ttk.Entry(self.loc_frame, textvariable=self.app.holygrail_max_aperture_var); max_ap_entry.grid(row=loc_row, column=1, sticky='ew', padx=5); loc_row += 1
         
@@ -136,7 +137,7 @@ class PiSliderGUI:
             for entry in [ev_entry, kelvin_entry]: entry.bind("<FocusIn>", self.app.on_entry_focus); entry.bind("<FocusOut>", self.app.on_entry_defocus)
             table_row += 1
             
-        hg_entries = [lat_entry, lon_entry, min_ap_entry, max_ap_entry, day_iso_entry, night_iso_entry, max_trans_iso_entry, iso_trans_entry, self.day_interval_entry, self.sunset_interval_entry, self.night_interval_entry]
+        hg_entries = [lat_entry, lon_entry, tz_entry, min_ap_entry, max_ap_entry, day_iso_entry, night_iso_entry, max_trans_iso_entry, iso_trans_entry, self.day_interval_entry, self.sunset_interval_entry, self.night_interval_entry]
         self.app.entry_widgets.extend(hg_entries)
         for entry in hg_entries: entry.bind("<FocusIn>", self.app.on_entry_focus); entry.bind("<FocusOut>", self.app.on_entry_defocus)
 
@@ -160,6 +161,7 @@ class PiSliderGUI:
         ttk.Label(parent_frame, text="Shutter:").grid(row=row, column=0, sticky='w'); ttk.Label(parent_frame, textvariable=self.app.live_shutter_var).grid(row=row, column=1, sticky='w'); row += 1
         ttk.Label(parent_frame, text="Aperture:").grid(row=row, column=0, sticky='w'); ttk.Label(parent_frame, textvariable=self.app.live_aperture_var).grid(row=row, column=1, sticky='w'); row += 1
         ttk.Label(parent_frame, text="Kelvin:").grid(row=row, column=0, sticky='w'); ttk.Label(parent_frame, textvariable=self.app.live_kelvin_var).grid(row=row, column=1, sticky='w'); row += 1
+        ttk.Label(parent_frame, text="Sun Angle:", font=self.bold_font).grid(row=row, column=0, sticky='w'); ttk.Label(parent_frame, textvariable=self.app.live_sun_angle_var, font=self.bold_font).grid(row=row, column=1, sticky='w'); row += 1
         ttk.Label(parent_frame, text="EV Offset:").grid(row=row, column=0, sticky='w'); ttk.Label(parent_frame, textvariable=self.app.live_ev_offset_var).grid(row=row, column=1, sticky='w'); row += 1
         ttk.Label(parent_frame, text="Interval:", font=self.bold_font).grid(row=row, column=0, sticky='w', pady=(5,0)); ttk.Label(parent_frame, textvariable=self.app.live_interval_var, font=self.bold_font).grid(row=row, column=1, sticky='w', pady=(5,0)); row += 1
         separator = ttk.Separator(parent_frame, orient='horizontal'); separator.grid(row=row, column=0, columnspan=2, sticky='ew', pady=5); row += 1
@@ -195,7 +197,8 @@ class PiSliderGUI:
         is_hg = self.app.holygrail_enabled_var.get()
         state = tkinter.NORMAL if is_hg and self.app.camera.gphoto2_available else tkinter.DISABLED
         self.calibrate_button.config(state=state)
-        row_num = 8  # Start row for interval entries after new ISO and transition fields
+        # The row number must be updated to account for the new Timezone field
+        row_num = 10
         if is_hg:
             self.day_interval_label.grid(row=row_num, column=0, sticky='w', padx=5, pady=2); self.day_interval_entry.grid(row=row_num, column=1, sticky='ew', padx=5); row_num+=1
             self.sunset_interval_label.grid(row=row_num, column=0, sticky='w', padx=5, pady=2); self.sunset_interval_entry.grid(row=row_num, column=1, sticky='ew', padx=5); row_num+=1

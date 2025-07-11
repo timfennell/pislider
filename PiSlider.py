@@ -82,6 +82,7 @@ class PiSliderApp:
         self.holygrail_enabled_var = tkinter.BooleanVar(value=True)
         self.holygrail_latitude_var = tkinter.StringVar(value="48.17293")
         self.holygrail_longitude_var = tkinter.StringVar(value="-82.521721")
+        self.holygrail_timezone_var = tkinter.StringVar(value="America/Toronto")
         self.holygrail_min_aperture_var = tkinter.DoubleVar(value=2.8)
         self.holygrail_max_aperture_var = tkinter.DoubleVar(value=11.0)
         self.holygrail_day_iso_var = tkinter.IntVar(value=100)
@@ -92,6 +93,7 @@ class PiSliderApp:
         self.holygrail_sunset_interval_var = tkinter.DoubleVar(value=5.0)
         self.holygrail_night_interval_var = tkinter.DoubleVar(value=40.0)
         self.calibration_offset_var = tkinter.StringVar(value="Not Calibrated")
+        self.live_sun_angle_var = tkinter.StringVar(value="--")
         self.live_iso_var, self.live_shutter_var, self.live_aperture_var, self.live_kelvin_var, self.live_ev_offset_var = (tkinter.StringVar(value="--") for _ in range(5))
         self.live_interval_var, self.live_slider_steps_var, self.live_rotation_steps_var = (tkinter.StringVar(value="--") for _ in range(3))
 
@@ -201,9 +203,13 @@ class PiSliderApp:
         try:
             if self.holygrail_enabled_var.get():
                 self.holygrail_controller = HolyGrailController(
-                    lat=float(self.holygrail_latitude_var.get()), lon=float(self.holygrail_longitude_var.get()),
-                    settings_table_dict=self.get_holygrail_settings_from_ui(), day_interval_s=self.holygrail_day_interval_var.get(),
-                    sunset_interval_s=self.holygrail_sunset_interval_var.get(), night_interval_s=self.holygrail_night_interval_var.get(),
+                    lat=float(self.holygrail_latitude_var.get()),
+                    lon=float(self.holygrail_longitude_var.get()),
+                    settings_table_dict=self.get_holygrail_settings_from_ui(),
+                    day_interval_s=self.holygrail_day_interval_var.get(),
+                    sunset_interval_s=self.holygrail_sunset_interval_var.get(),
+                    night_interval_s=self.holygrail_night_interval_var.get(),
+                    timezone_str=self.holygrail_timezone_var.get(),
                     iso_transition_duration_frames=self.holygrail_iso_transition_frames_var.get()
                 )
                 if self.anchor_offset_ev != 0.0:
@@ -234,14 +240,19 @@ class PiSliderApp:
     def _run_main_timelapse_loop(self):
         total_photos = self.num_photos_var.get()
         is_hg_mode = self.holygrail_enabled_var.get()
+        
         next_interval_start_time = time.time()
 
         for i in range(total_photos):
             if self.stop_flag.is_set(): break
             
             wait_time = next_interval_start_time - time.time()
-            if wait_time > 0 and self.stop_flag.wait(wait_time): break
+            if wait_time > 0:
+                if self.stop_flag.wait(wait_time):
+                    break
+            
             if self.stop_flag.is_set(): break
+            
             start_of_interval = time.time()
             
             report_data = {'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 'Frame': i + 1}
@@ -265,6 +276,9 @@ class PiSliderApp:
                             self.holygrail_min_aperture_var.get(), self.holygrail_max_aperture_var.get(),
                             self.holygrail_day_iso_var.get(), self.holygrail_night_iso_var.get(),
                             self.holygrail_max_transition_iso_var.get(), start_of_interval)
+                        
+                        sun_angle = self.holygrail_controller.last_sun_elevation
+                        self.root.after(0, lambda sa=sun_angle: self.live_sun_angle_var.set(f"{sa:.2f}°"))
                         
                         xmp_offset = params.get('xmp_ev_offset', 0.0)
                         self.last_xmp_offset = xmp_offset
@@ -290,7 +304,7 @@ class PiSliderApp:
                             'Actual_Settings_EV': f"{params.get('actual_settings_ev', 0):+.4f}", 'XMP_EV_Offset': f"{xmp_offset:+.4f}",
                             'Is_ISO_Transition_Frame': 'Yes' if hg.is_in_iso_transition else 'No', 'Final_ISO': params['iso'], 'Final_Shutter_Str': params['shutter'],
                             'Final_Bulb_Duration_s': f"{params['bulb_duration']:.2f}", 'Final_Aperture': params['aperture'], 'Final_Kelvin': params['kelvin'],
-                            'Interval_Blended_s': f"{np.interp(hg.last_sun_elevation, hg.interval_sun_angles, hg.target_intervals):.2f}",
+                            'Interval_Blended_s': f"{np.interp(hg.interval_sun_angles, hg.target_intervals, hg.last_sun_elevation):.2f}",
                             'Interval_Required_s': f"{hg.last_exposure_duration + hg.MIN_INTERVAL_SAFETY_BUFFER_S:.2f}", 'Interval_Final_s': f"{params['target_interval']:.2f}"})
                     except Exception as e: logging.error(f"HG shot {i+1} failed: {e}", exc_info=True); break
                 else:
@@ -301,7 +315,9 @@ class PiSliderApp:
                 self.report_writer.writerow([report_data.get(h, '') for h in header])
 
             target_interval = (self.holygrail_controller.last_used_interval if is_hg_mode and self.holygrail_controller else self.interval_var.get())
-            next_interval_start_time = start_of_interval + target_interval
+            
+            next_interval_start_time += target_interval
+            
             rem_time_s = target_interval * (total_photos - self.photos_taken)
             self.root.after(0, lambda s=rem_time_s: self.time_remaining_var.set(f"Time Rem: ~{self.format_time(s)}"))
 
@@ -460,7 +476,18 @@ class PiSliderApp:
             preview_for_ui = f"/tmp/ui_preview.jpg"
             if self.camera.capture_and_download(preview_dest, preview_for_ui):
                 self.root.after(0, lambda p=preview_for_ui: self.gui.update_preview_image(p))
-                temp_controller = HolyGrailController(float(self.holygrail_latitude_var.get()), float(self.holygrail_longitude_var.get()), self.get_holygrail_settings_from_ui(), 0,0,0)
+                
+                temp_controller = HolyGrailController(
+                    lat=float(self.holygrail_latitude_var.get()),
+                    lon=float(self.holygrail_longitude_var.get()),
+                    settings_table_dict=self.get_holygrail_settings_from_ui(),
+                    day_interval_s=self.holygrail_day_interval_var.get(),
+                    sunset_interval_s=self.holygrail_sunset_interval_var.get(),
+                    night_interval_s=self.holygrail_night_interval_var.get(),
+                    timezone_str=self.holygrail_timezone_var.get(),
+                    iso_transition_duration_frames=self.holygrail_iso_transition_frames_var.get()
+                )
+
                 if temp_controller.calibrate(preview_for_ui, user_iso, user_aperture, user_shutter_s):
                     self.anchor_offset_ev = temp_controller.anchor_offset
                     self.root.after(0, lambda: self.calibration_offset_var.set(f"Anchor Offset: {self.anchor_offset_ev:+.2f}"))
@@ -576,17 +603,26 @@ class PiSliderApp:
         return rotation_angles_rad_interval * (STEPS_PER_REVOLUTION_ROTATION / (2 * math.pi))
 
 if __name__ == "__main__":
-    def main():
-        root = None
+    root = tkinter.Tk()
+    app = None
+    try:
         try:
-            root = tkinter.Tk()
-            try: root.tk.call('tk', 'scaling', 2.0)
-            except tkinter.TclError: logging.warning("Could not set Tk scaling.")
-            root.title("PiSlider Control")
-            app = PiSliderApp(root)
-            if hasattr(app, 'hardware') and app.hardware and root.winfo_exists(): root.mainloop()
-        except Exception as e:
-            logging.critical(f"A fatal error occurred in main: {e}", exc_info=True)
-            if root and root.winfo_exists(): messagebox.showerror("Fatal Error", f"A critical error occurred: {e}")
-        finally: logging.info("--- PiSlider Application Shutdown ---")
-    main()
+            root.tk.call('tk', 'scaling', 2.0)
+        except tkinter.TclError:
+            logging.warning("Could not set Tk scaling.")
+        root.title("PiSlider Control")
+
+        app = PiSliderApp(root)
+
+        if root.winfo_exists():
+            root.mainloop()
+
+    except Exception as e:
+        logging.critical(f"A fatal error occurred during application startup: {e}", exc_info=True)
+        if root and root.winfo_exists():
+            messagebox.showerror("Fatal Error", f"A critical error occurred: {e}\nApplication will exit.")
+            root.destroy()
+    finally:
+        if app and hasattr(app, 'stop_flag'):
+             app.stop_flag.set()
+        logging.info("--- PiSlider Application Shutdown ---")

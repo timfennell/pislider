@@ -24,7 +24,7 @@ class HolyGrailController:
     INTERVAL_SMOOTHING_FACTOR = 0.025
 
     def __init__(self, lat, lon, settings_table_dict, day_interval_s, sunset_interval_s, night_interval_s,
-                 interval_smoothing_factor=None, iso_transition_duration_frames=30):
+                 timezone_str=None, interval_smoothing_factor=None, iso_transition_duration_frames=30):
         self.latitude, self.longitude = lat, lon
         self.day_interval_s, self.sunset_interval_s, self.night_interval_s = day_interval_s, sunset_interval_s, night_interval_s
         self.anchor_offset, self.reactive_ev_offset, self.last_exposure_duration = 0.0, 0.0, 1.0
@@ -35,10 +35,16 @@ class HolyGrailController:
         self.iso_transition_frame_count = 0
         self.iso_transition_duration_frames = iso_transition_duration_frames
         
-        try:
-            tz_path = os.path.realpath('/etc/localtime')
-            self.timezone_str = tz_path.split('/usr/share/zoneinfo/')[-1]
-        except Exception: self.timezone_str = 'UTC'
+        if timezone_str:
+            self.timezone_str = timezone_str
+        else:
+            try:
+                tz_path = os.path.realpath('/etc/localtime')
+                self.timezone_str = tz_path.split('/usr/share/zoneinfo/')[-1]
+                logging.info("Auto-detected timezone from system.")
+            except Exception:
+                self.timezone_str = 'UTC'
+                logging.warning("Could not auto-detect timezone, defaulting to UTC. Please set manually.")
         
         ev_table = settings_table_dict or self.DEFAULT_EV_TABLE
         table_items = sorted(list(ev_table.items()), key=lambda item: item[0])
@@ -52,31 +58,32 @@ class HolyGrailController:
             self.tz = pytz.timezone(self.timezone_str)
             self.location = LocationInfo("PiSlider", "Earth", self.timezone_str, self.latitude, self.longitude)
             logging.info(f"HolyGrailController initialized with timezone: {self.timezone_str}")
-            self._create_dynamic_interval_table()
-            self._update_sun_elevation(time.time())
+            
+            now = datetime.now(self.tz)
+            self._create_dynamic_interval_table(now)
+            self._update_sun_elevation(now)
+            
             initial_blended_interval = self._eased_interp(self.last_sun_elevation, self.interval_sun_angles, self.target_intervals)
             self.last_used_interval = initial_blended_interval
             logging.info(f"Dynamically set initial interval to {self.last_used_interval:.2f}s based on current sun elevation.")
         except Exception as e: raise ValueError(f"Invalid timezone or location for Holy Grail: {e}")
 
-    def _create_dynamic_interval_table(self):
-        now = datetime.now(self.tz)
+    def _create_dynamic_interval_table(self, now):
         try:
-            s = sun(self.location.observer, date=now.date())
+            s = sun(self.location.observer, date=now.date(), tzinfo=self.tz)
             sunset_dt = s['sunset']
             
-            pre_ramp_start_dt, pre_ramp_end_dt = sunset_dt - timedelta(minutes=50), sunset_dt - timedelta(minutes=10)
-            post_ramp_start_dt, post_ramp_end_dt = sunset_dt + timedelta(minutes=10), sunset_dt + timedelta(minutes=50)
-            
-            self.location.observer.date = pre_ramp_start_dt
-            pre_ramp_start_angle = self.location.observer.elevation
-            self.location.observer.date = pre_ramp_end_dt
-            pre_ramp_end_angle = self.location.observer.elevation
-            self.location.observer.date = post_ramp_start_dt
-            post_ramp_start_angle = self.location.observer.elevation
-            self.location.observer.date = post_ramp_end_dt
-            post_ramp_end_angle = self.location.observer.elevation
-            
+            pre_ramp_start_dt = sunset_dt - timedelta(minutes=50)
+            pre_ramp_end_dt = sunset_dt - timedelta(minutes=10)
+            post_ramp_start_dt = sunset_dt + timedelta(minutes=10)
+            post_ramp_end_dt = sunset_dt + timedelta(minutes=50)
+
+            sun_data = sun(self.location.observer, date=now.date())
+            pre_ramp_start_angle = sun_data.elevation(pre_ramp_start_dt)
+            pre_ramp_end_angle = sun_data.elevation(pre_ramp_end_dt)
+            post_ramp_start_angle = sun_data.elevation(post_ramp_start_dt)
+            post_ramp_end_angle = sun_data.elevation(post_ramp_end_dt)
+
             keyframes = {-18.0: self.night_interval_s, post_ramp_end_angle: self.night_interval_s, post_ramp_start_angle: self.sunset_interval_s, pre_ramp_end_angle: self.sunset_interval_s, pre_ramp_start_angle: self.day_interval_s, 20.0: self.day_interval_s}
             sorted_angles = sorted(keyframes.keys())
             self.interval_sun_angles, self.target_intervals = np.array(sorted_angles), np.array([keyframes[angle] for angle in sorted_angles])
@@ -84,11 +91,13 @@ class HolyGrailController:
             logging.error(f"Could not calculate dynamic sunset-based ramps: {e}. Falling back to simple table.", exc_info=True)
             self.interval_sun_angles, self.target_intervals = np.array([-18.0, -6.0, 0.0, 20.0]), np.array([self.night_interval_s, self.sunset_interval_s, self.day_interval_s, self.day_interval_s])
 
-    def _update_sun_elevation(self, execution_timestamp):
+    def _update_sun_elevation(self, execution_datetime):
         try:
-            self.location.observer.date = datetime.fromtimestamp(execution_timestamp, self.tz)
-            self.last_sun_elevation = self.location.observer.elevation
-        except Exception as e: logging.error(f"Could not calculate sun elevation: {e}", exc_info=True)
+            sun_data = sun(self.location.observer, date=execution_datetime.date())
+            self.last_sun_elevation = sun_data.elevation(at=execution_datetime)
+        except Exception as e:
+            logging.error(f"Could not calculate sun elevation: {e}", exc_info=True)
+            self.last_sun_elevation = 0
 
     def calibrate(self, image_path, camera_iso, camera_aperture, camera_shutter_s):
         logging.info(f"Calibrating with settings: ISO {camera_iso}, f/{camera_aperture}, {camera_shutter_s}s")
@@ -98,7 +107,9 @@ class HolyGrailController:
         if measured_brightness is None: return False
         metering_error_ev = math.log2(self.target_brightness / measured_brightness)
         true_scene_ev = measured_ev - metering_error_ev
-        self._update_sun_elevation(time.time())
+        
+        self._update_sun_elevation(datetime.now(self.tz))
+        
         predictive_ev_at_calib = np.interp(self.last_sun_elevation, self.ev_sun_angles, self.target_evs)
         self.anchor_offset = true_scene_ev - predictive_ev_at_calib
         logging.info(f"Calibration complete. Anchor Offset set to: {self.anchor_offset:+.2f} EV")
@@ -124,13 +135,16 @@ class HolyGrailController:
         return math.log2((aperture**2 * 100) / (iso * shutter_s))
 
     def get_next_shot_parameters(self, min_aperture, max_aperture, day_iso, night_native_iso, max_transition_iso, execution_timestamp=None):
-        if not execution_timestamp: execution_timestamp = time.time()
-        self._update_sun_elevation(execution_timestamp)
+        shot_datetime = datetime.fromtimestamp(execution_timestamp, self.tz) if execution_timestamp else datetime.now(self.tz)
+        
+        self._update_sun_elevation(shot_datetime)
+        
         predictive_ev_now = np.interp(self.last_sun_elevation, self.ev_sun_angles, self.target_evs)
         ideal_target_ev = predictive_ev_now + self.anchor_offset + self.reactive_ev_offset
-        logging.info(f"Ideal Target EV: {ideal_target_ev:.2f} (Sun: {predictive_ev_now:.2f}, Anchor: {self.anchor_offset:+.2f}, Reactive: {self.reactive_ev_offset:+.2f})")
+        logging.info(f"Ideal Target EV: {ideal_target_ev:.2f} (Sun Angle: {self.last_sun_elevation:.2f}°, Pred. EV: {predictive_ev_now:.2f}, Anchor: {self.anchor_offset:+.2f}, Reactive: {self.reactive_ev_offset:+.2f})")
         target_kelvin = int(np.interp(self.last_sun_elevation, self.ev_sun_angles, self.kelvin_vals))
         blended_interval = self._eased_interp(self.last_sun_elevation, self.interval_sun_angles, self.target_intervals)
+        
         exposure_settings = {}
         current_aperture = min_aperture
 
@@ -146,22 +160,28 @@ class HolyGrailController:
                 self.is_in_iso_transition, self.iso_transition_frame_count = False, 0
                 logging.info("ISO transition to Night Native ISO complete.")
         else:
-            current_iso = day_iso
-            while True:
-                shutter_s = (current_aperture**2 * 100) / (2**ideal_target_ev * current_iso)
-                if shutter_s > 30.0:
-                    if current_iso < max_transition_iso:
-                        next_iso_index = np.searchsorted(self.STANDARD_ISOS, current_iso, side='right')
-                        if next_iso_index < len(self.STANDARD_ISOS) and self.STANDARD_ISOS[next_iso_index] <= max_transition_iso:
-                            current_iso = self.STANDARD_ISOS[next_iso_index]; continue
-                    logging.info(f"Max transition ISO ({max_transition_iso}) reached. Starting smooth ISO ramp-down to bulb mode.")
-                    self.is_in_iso_transition, self.iso_transition_frame_count = True, 0
-                    exposure_settings = self._package_settings('bulb', current_iso, 0, shutter_s, current_aperture, target_kelvin)
-                    break
-                elif shutter_s <= 1/8000:
-                    exposure_settings = self._package_settings('normal', current_iso, 1/8000, 0, current_aperture, target_kelvin); break
-                else:
-                    exposure_settings = self._package_settings('normal', current_iso, shutter_s, 0, current_aperture, target_kelvin); break
+            shutter_for_day_iso = (current_aperture**2 * 100) / (2**ideal_target_ev * day_iso)
+
+            if shutter_for_day_iso <= 30.0:
+                logging.info(f"Day/Bright state detected. Using Day ISO ({day_iso}).")
+                exposure_settings = self._package_settings('normal', day_iso, shutter_for_day_iso, 0, current_aperture, target_kelvin)
+            else:
+                found_iso = False
+                for iso_candidate in self.STANDARD_ISOS:
+                    if iso_candidate <= day_iso: continue
+                    if iso_candidate > max_transition_iso: break
+                    shutter_s = (current_aperture**2 * 100) / (2**ideal_target_ev * iso_candidate)
+                    if shutter_s <= 30.0:
+                        logging.info(f"Dark Transition state detected. Found suitable ISO: {iso_candidate}")
+                        exposure_settings = self._package_settings('normal', iso_candidate, shutter_s, 0, current_aperture, target_kelvin)
+                        found_iso = True
+                        break
+                
+                if not found_iso:
+                    logging.info(f"Night state detected. Entering bulb mode and starting ISO transition from {max_transition_iso}.")
+                    self.is_in_iso_transition, self.iso_transition_frame_count = True, 1
+                    bulb_duration_s = (current_aperture**2 * 100) / (2**ideal_target_ev * max_transition_iso)
+                    exposure_settings = self._package_settings('bulb', max_transition_iso, 0, bulb_duration_s, current_aperture, target_kelvin)
 
         actual_shutter_s = exposure_settings['bulb_duration'] if exposure_settings['mode'] == 'bulb' else self.get_shutter_s(exposure_settings['shutter'])
         actual_settings_ev = self._calculate_ev_from_settings(exposure_settings['iso'], float(exposure_settings['aperture']), actual_shutter_s)

@@ -197,7 +197,6 @@ class PiSliderGUI:
         is_hg = self.app.holygrail_enabled_var.get()
         state = tkinter.NORMAL if is_hg and self.app.camera.gphoto2_available else tkinter.DISABLED
         self.calibrate_button.config(state=state)
-        # The row number must be updated to account for the new Timezone field
         row_num = 10
         if is_hg:
             self.day_interval_label.grid(row=row_num, column=0, sticky='w', padx=5, pady=2); self.day_interval_entry.grid(row=row_num, column=1, sticky='ew', padx=5); row_num+=1

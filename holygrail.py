@@ -9,7 +9,7 @@ from PIL import Image, ImageStat
 
 try:
     from astral.location import LocationInfo
-    from astral.sun import sun
+    from astral.sun import sun, elevation
 except ImportError:
     raise ImportError("Astral and Pytz are required for Holy Grail mode.")
 
@@ -78,11 +78,12 @@ class HolyGrailController:
             post_ramp_start_dt = sunset_dt + timedelta(minutes=10)
             post_ramp_end_dt = sunset_dt + timedelta(minutes=50)
 
-            sun_data = sun(self.location.observer, date=now.date())
-            pre_ramp_start_angle = sun_data.elevation(pre_ramp_start_dt)
-            pre_ramp_end_angle = sun_data.elevation(pre_ramp_end_dt)
-            post_ramp_start_angle = sun_data.elevation(post_ramp_start_dt)
-            post_ramp_end_angle = sun_data.elevation(post_ramp_end_dt)
+            # --- THE FIX ---
+            # Remove the 'at=' keyword argument
+            pre_ramp_start_angle = elevation(self.location.observer, pre_ramp_start_dt)
+            pre_ramp_end_angle = elevation(self.location.observer, pre_ramp_end_dt)
+            post_ramp_start_angle = elevation(self.location.observer, post_ramp_start_dt)
+            post_ramp_end_angle = elevation(self.location.observer, post_ramp_end_dt)
 
             keyframes = {-18.0: self.night_interval_s, post_ramp_end_angle: self.night_interval_s, post_ramp_start_angle: self.sunset_interval_s, pre_ramp_end_angle: self.sunset_interval_s, pre_ramp_start_angle: self.day_interval_s, 20.0: self.day_interval_s}
             sorted_angles = sorted(keyframes.keys())
@@ -93,8 +94,9 @@ class HolyGrailController:
 
     def _update_sun_elevation(self, execution_datetime):
         try:
-            sun_data = sun(self.location.observer, date=execution_datetime.date())
-            self.last_sun_elevation = sun_data.elevation(at=execution_datetime)
+            # --- THE FIX ---
+            # Remove the 'at=' keyword argument
+            self.last_sun_elevation = elevation(self.location.observer, execution_datetime)
         except Exception as e:
             logging.error(f"Could not calculate sun elevation: {e}", exc_info=True)
             self.last_sun_elevation = 0

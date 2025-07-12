@@ -298,13 +298,17 @@ class PiSliderApp:
                         
                         hg = self.holygrail_controller
                         ideal_ev = np.interp(hg.last_sun_elevation, hg.ev_sun_angles, hg.target_evs)
+                        
+                        # Corrected np.interp argument order
+                        blended_s = np.interp(hg.last_sun_elevation, hg.interval_sun_angles, hg.target_intervals)
+
                         report_data.update({
                             'Sun_Elevation_Deg': f"{hg.last_sun_elevation:.4f}", 'Ideal_Target_EV': f"{ideal_ev:+.4f}",
                             'Reactive_EV_Offset': f"{hg.reactive_ev_offset:+.4f}", 'Final_Target_EV': f"{ideal_ev + hg.anchor_offset + hg.reactive_ev_offset:+.4f}",
                             'Actual_Settings_EV': f"{params.get('actual_settings_ev', 0):+.4f}", 'XMP_EV_Offset': f"{xmp_offset:+.4f}",
                             'Is_ISO_Transition_Frame': 'Yes' if hg.is_in_iso_transition else 'No', 'Final_ISO': params['iso'], 'Final_Shutter_Str': params['shutter'],
                             'Final_Bulb_Duration_s': f"{params['bulb_duration']:.2f}", 'Final_Aperture': params['aperture'], 'Final_Kelvin': params['kelvin'],
-                            'Interval_Blended_s': f"{np.interp(hg.interval_sun_angles, hg.target_intervals, hg.last_sun_elevation):.2f}",
+                            'Interval_Blended_s': f"{blended_s:.2f}",
                             'Interval_Required_s': f"{hg.last_exposure_duration + hg.MIN_INTERVAL_SAFETY_BUFFER_S:.2f}", 'Interval_Final_s': f"{params['target_interval']:.2f}"})
                     except Exception as e: logging.error(f"HG shot {i+1} failed: {e}", exc_info=True); break
                 else:

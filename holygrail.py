@@ -78,8 +78,6 @@ class HolyGrailController:
             post_ramp_start_dt = sunset_dt + timedelta(minutes=10)
             post_ramp_end_dt = sunset_dt + timedelta(minutes=50)
 
-            # --- THE FIX ---
-            # Remove the 'at=' keyword argument
             pre_ramp_start_angle = elevation(self.location.observer, pre_ramp_start_dt)
             pre_ramp_end_angle = elevation(self.location.observer, pre_ramp_end_dt)
             post_ramp_start_angle = elevation(self.location.observer, post_ramp_start_dt)
@@ -94,8 +92,6 @@ class HolyGrailController:
 
     def _update_sun_elevation(self, execution_datetime):
         try:
-            # --- THE FIX ---
-            # Remove the 'at=' keyword argument
             self.last_sun_elevation = elevation(self.location.observer, execution_datetime)
         except Exception as e:
             logging.error(f"Could not calculate sun elevation: {e}", exc_info=True)
@@ -133,7 +129,7 @@ class HolyGrailController:
         return y_start + self._ease_in_out_normalized(progress) * (y_end - y_start)
     
     def _calculate_ev_from_settings(self, iso, aperture, shutter_s):
-        if shutter_s == 0: return -np.inf
+        if shutter_s <= 0: return -np.inf
         return math.log2((aperture**2 * 100) / (iso * shutter_s))
 
     def get_next_shot_parameters(self, min_aperture, max_aperture, day_iso, night_native_iso, max_transition_iso, execution_timestamp=None):
@@ -143,6 +139,14 @@ class HolyGrailController:
         
         predictive_ev_now = np.interp(self.last_sun_elevation, self.ev_sun_angles, self.target_evs)
         ideal_target_ev = predictive_ev_now + self.anchor_offset + self.reactive_ev_offset
+        
+        # Clamp the Ideal Target EV to prevent impossible shutter speeds
+        max_possible_ev = self._calculate_ev_from_settings(day_iso, min_aperture, 1/8000.0)
+        
+        if ideal_target_ev > max_possible_ev:
+            logging.warning(f"Ideal Target EV ({ideal_target_ev:.2f}) exceeds camera's max possible EV ({max_possible_ev:.2f}). Clamping EV.")
+            ideal_target_ev = max_possible_ev
+
         logging.info(f"Ideal Target EV: {ideal_target_ev:.2f} (Sun Angle: {self.last_sun_elevation:.2f}°, Pred. EV: {predictive_ev_now:.2f}, Anchor: {self.anchor_offset:+.2f}, Reactive: {self.reactive_ev_offset:+.2f})")
         target_kelvin = int(np.interp(self.last_sun_elevation, self.ev_sun_angles, self.kelvin_vals))
         blended_interval = self._eased_interp(self.last_sun_elevation, self.interval_sun_angles, self.target_intervals)
